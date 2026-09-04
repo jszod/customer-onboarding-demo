@@ -22,9 +22,9 @@ Fill out forms - create structured data
 ## Working read of the flow
 
 ```
-1. Collect documents          → customer/accountant uploads
+1. Collect documents          → onboarding specialist uploads
 2. Extract + structure        → AI: pull fields out of docs, fill the application
-3. Human review               → a person approves the extracted data
+3. Human review               → KYC analyst approves the extracted data
 4. Open account               → call to external core banking system
 5. Receive approved client ID → external system responds (possibly slowly)
 6. Send documents             → deliver welcome pack / signed forms
@@ -73,18 +73,40 @@ package (`uv add` from git) providing durable agent workflows, a tool-approval
 policy engine that escalates to a human, and a packaged UI. **Harness vs.
 hand-rolled loop is not yet decided.**
 
-### 2. Persona — external accountant submits, bank reviews
+### 2. Persona — bank-internal: Onboarding Specialist submits, KYC Analyst approves
+
+> **Revised 2026-09-04.** Session 1 read the raw note "Account opening is
+> probably the accountant" as an *external* accountant acting for a client.
+> Research into how business account opening actually works says that is a
+> mis-transcription — most likely "the account manager" or "the onboarding
+> specialist". Either way the persona is **bank-internal.** See
+> [Persona research](#persona-research-2026-09-04) below.
 
 Three distinct actors:
 
 | Actor | Role |
 |-------|------|
-| External accountant | Uploads documents on behalf of their client |
-| Bank operations analyst | The human who approves the extracted data (step 3) |
-| End client | The account holder; notified at step 7 |
+| Client Onboarding Specialist | Uploads the client's documents, prepares and validates the application (steps 1–2) |
+| KYC/AML Analyst | The human gate — reviews the extracted data and approves (step 3) |
+| End client | The business and its beneficial owners; notified at step 7 |
 
-The trust asymmetry between submitter and reviewer is *why* the review gate
-exists. Step 7 notifies both the accountant and the end client.
+The Relationship Manager is a real fourth role — client-facing, chases
+documents — but is deliberately **out of scope as a named actor.** Adding them
+costs spec surface without changing a single Temporal primitive.
+
+**Why the review gate exists: segregation of duties.** The person who prepares
+the application is not permitted to be the person who signs off KYC. That is a
+regulatory constraint the audience already lives with, not a design choice
+that needs defending. (Session 1 justified the gate by trust asymmetry between
+an outside accountant and the bank — a much softer argument.)
+
+**Knock-on effect — the document set gets better.** Retail onboarding gives
+thin extraction material (passport plus utility bill). Business account
+opening gives articles of incorporation, business license, EIN letter, W-9, and
+beneficial-ownership declarations. Genuinely multi-document: a field like
+`tax_id`, or a 25%-owner's date of birth, plausibly lives in a different file
+than expected, or is missing entirely. This is what makes the decision-1 agent
+loop and the escalation beat credible rather than staged.
 
 ### 3. Real vs. seeded AI — live by default, fixture mode for tests
 
@@ -142,6 +164,36 @@ Temporal's answer is two-part, and legible in about fifteen seconds:
 
 **AI escalation is a feature beat, not the crisis.** The agent failing to find
 a required field is graceful degradation and belongs in step 2's narration.
+
+## Persona research (2026-09-04)
+
+Quick web research to settle whether "the accountant" in the raw notes was a
+typo. It was.
+
+**The standard cast in commercial / business account opening:**
+
+| Role | What they do |
+|------|--------------|
+| Relationship Manager | Owns the client relationship, guides them through onboarding, handles compliance queries, chases documents |
+| Client Onboarding Specialist / Onboarding Manager | Operational owner — collects information, prepares and validates documentation, keys the application into internal systems, coordinates across teams |
+| KYC/AML Analyst | Processes new client and account-opening forms, runs due-diligence searches, performs reviews by risk tier |
+| Treasury Management Officer, Implementation Coordinator, Portfolio Manager | Larger banks only; specialist partners the onboarding specialist pulls in |
+
+**Why the external-accountant reading was rejected.** It is not fictional —
+accountants do act as agents for small-business clients — but federal
+Beneficial Ownership Information (BOI) rules require the bank to identify and
+verify the individuals who own or control the business, and those people
+generally must verify themselves. So an external accountant cannot be the sole
+submitter. That drags a legal wrinkle into the demo that has nothing to do
+with what the demo is teaching.
+
+Sources:
+[Velvet Jobs — KYC/account opening job descriptions](https://www.velvetjobs.com/job-descriptions/account-opening),
+[Fifth Third — Client On-Boarding Specialist](https://jobgether.com/offer/69fd66fff77bd301986731b8-client-on-boarding-specialist),
+[nCino — commercial onboarding](https://www.ncino.com/blog/how-leading-banks-are-turning-commercial-onboarding-into-their-next-revenue-driver),
+[Bank of America — onboarding requirements](https://business.bofa.com/content/dam/boamlimages/documents/articles/B2_025/BofA_Onboarding_Requirements.pdf),
+[Grasshopper — opening a business bank account](https://www.grasshopper.bank/who-we-are/blog/a-comprehensive-guide-to-opening-a-business-bank-account/),
+[SVB — understanding KYC compliance](https://www.svb.com/startup-insights/startup-strategy/understanding-kyc-compliance/)
 
 ## Open questions remaining
 
