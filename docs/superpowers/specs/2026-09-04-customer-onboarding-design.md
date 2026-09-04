@@ -928,6 +928,27 @@ string name, which is what makes `CONTRACT.md` real rather than aspirational.
 and for anyone cloning cold. `make test-live` is a separate opt-in that
 exercises the live model path.
 
+### 16.0 Stubs vs. fixtures — two different things
+
+These are distinct, and the rules differ. Conflating them makes §16.7 read as
+banning both, which would force the workflow tests to call a live model.
+
+| | **Stub** | **Fixture** |
+|---|---|---|
+| What | A canned value a test constructs inline | A recorded real model response, replayed from `fixtures/` |
+| Hand-written? | **Yes — correct and expected** | **Never** |
+| Tests what | Control flow: does the workflow branch correctly given input X | Realism: does the loop actually find `tax_id` in the W-9 |
+| Example | §16.2's stub child returning a canned `ExtractionResult` | §16.4's recorded `LLMResponse` sequence |
+| Lives in | The test file | `fixtures/`, committed |
+
+**"Never hand-written" applies only to fixtures.** A hand-written fixture
+drifts from real model output and silently stops testing anything, while
+looking like it still does. A hand-written stub is just a test double and is
+the right tool for asserting branch behaviour.
+
+`FIXTURE_MODE=1` selects the fixture-backed `call_llm` implementation. It has
+nothing to do with stubs, which are ordinary test code.
+
 ### 16.1 Activity unit tests (`ActivityEnvironment`)
 
 - `ingest_documents` — copies files, returns refs; missing file raises
@@ -989,10 +1010,31 @@ grep-based CI check covers the rest: no `requests`, `httpx`,
 
 ### 16.7 Fixture bootstrap order
 
-Fixtures are **recorded from real runs, never hand-written** — a hand-written
-fixture drifts from real model output and silently stops testing anything.
-Record once with an API key (`make fixtures`), commit them, and from then on
-nobody needs a key to run the suite.
+Fixtures — not stubs; see §16.0 — are **recorded from real runs, never
+hand-written.** A hand-written fixture drifts from real model output and
+silently stops testing anything while still appearing to.
+
+Order, and it matters because each step depends on the previous one:
+
+1. **Generate the sample documents.** `documents/acme-corp/` — text-layer PDFs
+   for articles of incorporation, business license, EIN letter, W-9, and the
+   ownership declaration, with §8.4's deliberate missing `dob`. Produced from
+   templates by an implementing agent; no manual authoring.
+2. **Record the fixtures.** `make fixtures` runs the extraction loop live and
+   writes the response sequence to `fixtures/`. Requires
+   `ANTHROPIC_API_KEY` in the environment — **the one prerequisite a human must
+   supply**, and only once.
+3. **Commit documents and fixtures.** From here the suite runs keyless forever.
+4. **Capture histories.** `make histories` (§16.5), which needs the fixtures in
+   place so the runs are reproducible.
+
+Steps 1, 2 and 4 are all agent-executable. Nothing on this list requires a
+human to author content by hand.
+
+**Re-record when, and only when:** the prompt changes, `ApplicationFields`
+changes, or the document set changes. A fixture that no longer matches the
+current prompt is worse than no fixture, so `make fixtures` is a deliberate act
+and its output is reviewed in the diff.
 
 **Stage 2 consequence: task 1 is this harness, not a feature.** Everything
 downstream gates on it.
