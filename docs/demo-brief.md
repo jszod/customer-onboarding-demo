@@ -68,10 +68,9 @@ Why, over the alternatives:
 Cost accepted: two workflow types instead of one, and a multi-SDK contract
 must cover the child's boundary too.
 
-Likely built on `temporal-agent-harness` — it is an installable Python
-package (`uv add` from git) providing durable agent workflows, a tool-approval
-policy engine that escalates to a human, and a packaged UI. **Harness vs.
-hand-rolled loop is not yet decided.**
+Implementation settled by **decision 8**: a hand-rolled loop adapted from
+`canonical-ai-demo`, not `temporal-agent-harness`. (Session 1 expected the
+harness; session 2 decided against it.)
 
 ### 2. Persona — bank-internal: Onboarding Specialist submits, KYC Analyst approves
 
@@ -346,6 +345,248 @@ dev path.
 nicer to write, but Makefile matches the demo siblings and consistency wins for
 something run in front of people.
 
+### 11. Domain — commercial / business account opening
+
+**This was an implicit choice made explicit.** Session 2's persona revision
+introduced business documents as a *knock-on* of the research into banking
+roles; commercial-vs-consumer was never asked. Confirmed deliberately
+2026-09-04.
+
+Commercial serves the earlier decisions better than consumer would:
+
+- **The agent loop stays real.** Consumer onboarding is one government ID —
+  extraction becomes a single call with no cross-document search and no
+  plausible gap. Decision 1 justified the child workflow on the loop being
+  genuine.
+- **A days-long human gate stays plausible.** Retail account opening takes
+  minutes and is largely self-serve; commercial review in days is the norm,
+  which is what decision 4's SLA beat rests on.
+- **Segregation of duties has weight** only where there is real judgment to
+  segregate.
+
+Rejected: *consumer/retail* (too simple in exactly the places the demo needs
+complexity) and *consumer escalated to enhanced due diligence* (plausible, and
+it would justify the gate, but it models an exception path rather than the
+mainline process).
+
+**Terminology:** the field is `beneficial_owners`, never "beneficiaries."
+A **beneficial owner** is a natural person owning or controlling ≥25% of a
+legal entity — the term behind BOI. A **beneficiary** receives assets
+(payable-on-death, trusts, insurance) and has nothing to do with account
+opening. A banker would catch the substitution immediately.
+
+## Design walkthrough — approved sections (2026-09-04)
+
+### §1 Workflow topology
+
+Two workflow types, one task queue (`customer-onboarding`).
+
+```
+OnboardingWorkflow                 id: onboarding-<client-key>
+│
+├─ 1. ingest_documents (activity)       → DocumentManifest (refs)
+├─ 2. ExtractionAgentWorkflow (child)   id: <parent>-extract-<attempt>
+│        └─ ReAct loop: call_llm ⇄ tool activities
+│           returns ExtractionResult{application, gaps, iterations, escalated}
+├─ 3. ── wait for KYC review ──          (durable, days)
+│        reject-with-reason → new child attempt at step 2
+├─ 4. open_account (activity)           idempotency key = workflow ID
+├─ 5. ── wait for client_id signal ──    (durable, SLA timer as fallback)
+├─ 6. send_documents (activity)
+└─ 7. notify (activity)                  → onboarding specialist + end client
+```
+
+- **Workflow ID is `onboarding-<client-key>`, not a UUID.** Temporal forbids
+  two open runs with the same ID, so this buys "one open onboarding per
+  client" — a real compliance property. Demo re-runs work because the prior
+  run is closed.
+- **Child ID carries an attempt number**, following canonical's
+  `<conversation-id>-checkout-<attempt>` convention.
+- **A fourth reason the child is a child**, better than the three in decision
+  1: when the analyst rejects with "you missed the EIN letter," the parent
+  starts a *new* child attempt with the added document. Fresh child, fresh
+  history, clean loop — rather than resuming a poisoned conversation. This is
+  the reason that survives a reviewer citing *"don't use child workflows
+  merely to decompose."*
+- **No continue-as-new.** Parent history is ~7 activities plus signals; the
+  child is iteration-capped. Neither approaches 10k events.
+- **Parent close policy:** default `TERMINATE`. The parent always awaits the
+  child, so an orphan cannot exist.
+
+### §2 Data flow and payload shapes
+
+**Every handler takes exactly one Pydantic model, or nothing.** No positional
+argument lists anywhere, including single-field payloads, and including return
+types. Rationale: `core/versioning.md` lists *"changing arguments passed to
+activities or child workflows"* as a breaking change — adding a parameter
+changes arity and breaks replay for in-flight runs, while adding an optional
+field to a model does not. This demo will be edited repeatedly between calls,
+so it matters more here than in a normal app.
+
+| Handler | Argument | Returns |
+|---------|----------|---------|
+| `OnboardingWorkflow.run` | `ApplicationRequest` | `OnboardingResult` |
+| `ExtractionAgentWorkflow.run` | `ExtractionRequest` | `ExtractionResult` |
+| `ingest_documents` | `IngestRequest` | `DocumentManifest` |
+| `call_llm` | `LLMRequest` | `LLMResponse` |
+| `open_account` | `OpenAccountRequest` | `OpenAccountAck` |
+| `send_documents` | `SendDocumentsRequest` | `SendDocumentsResult` |
+| `notify` | `NotifyRequest` | `NotifyResult` |
+| `submit_review` (update) | `ReviewSubmission` | `ReviewAck` |
+| `client_id_received` (signal) | `ClientIdAssignment` | — |
+| `status` (query) | — | `OnboardingStatus` |
+
+`OpenAccountAck` deliberately does **not** carry the client ID — that is the
+point of decision 5. Its `status: accepted | duplicate` is what proves the
+idempotency key worked, and `duplicate` is what you point at on stage.
+
+**`ingest_documents` stays in the workflow.** It was briefly dropped on the
+grounds that the gateway already knows the manifest. Restored, because:
+
+- the workflow must contain the whole process — the demo's thesis is that the
+  workflow file *is* the business process, and collection happening in the
+  gateway means a reader opens the workflow and the process starts at
+  extraction;
+- a failed copy inside an activity retries under policy and is visible in the
+  UI, rather than being an HTTP 500 the operator re-clicks;
+- decision 9 gets its opening line, `summary="Collect 5 documents for Acme
+  Corp"`, so the timeline reads as the business process from the top;
+- the workflow owns its own inputs, so re-runs do not depend on the gateway
+  re-minting refs.
+
+Start payload is therefore `ApplicationRequest{client_key, legal_name}` — refs
+are produced inside the workflow.
+
+**Explicit scope cut — document trickle.** The faithful model is a workflow
+that starts at application creation and then *waits for documents to arrive by
+signal*, one at a time, with an SLA timer for chasing the client; banks chase
+paperwork for weeks. Cut deliberately: it adds a second long-running wait and
+a second timer story, and decision 4 committed to one headline failure. The
+spec must state the cut, because a banker will ask — and "yes, that's a signal
+loop, here is where it attaches, we cut it to keep one headline" is a far
+better answer than silence.
+
+**The human decision is an update, not a signal.** The analyst can *edit*
+field values, because correcting data is much of what KYC review actually is.
+Edits want synchronous validation, and an update **validator** rejects
+malformed input before it enters history; a signal would let bad data land and
+force the workflow to cope afterwards. Updates also return a value, so the
+console gets confirmation instead of polling to find out whether its
+submission took.
+
+The demo therefore uses all three primitives where each belongs, and can
+justify each:
+
+| Primitive | Used for | Why not the others |
+|-----------|----------|--------------------|
+| Update | `submit_review` | needs validation and a response |
+| Signal | `client_id_received` | external system, fire-and-forget, nothing to return |
+| Query | `status` | read-only, drives the console |
+
+Validator limits: validators must not block or mutate, so checks are format
+and internal consistency only — EIN shape, `ownership_pct` summing to ≤100,
+required fields non-empty. Anything needing I/O ("does this EIN exist?") is an
+activity after the update is accepted.
+
+**Audit rule: never overwrite the AI's output in place.**
+`ExtractionResult.application` is what the model produced,
+`ReviewSubmission.field_edits` is the human delta, and the final application is
+the merge. Both are already in history, so the trail is free — and "here is
+what the model said, here is what the human changed, here is who changed it" is
+a strong thirty seconds for a bank.
+
+**Big things travel by reference, small things by value.** Temporal records
+activity inputs *and* outputs, so if `LLMRequest` carried document text,
+iteration 6 would re-record everything from iterations 1–5 — quadratic growth,
+and a plausible breach of the 2MB payload cap. So:
+
+- `LLMRequest` carries **document refs**; the activity reads document text from
+  the store itself. Document content never enters history.
+- The conversation *does* stay in child history — a couple of KB per
+  structured reply — because that is what makes the child's timeline readable
+  in the Temporal UI. This is the harness event stream given up in decision 8,
+  recovered at no cost.
+- **Cap tool results** (~4KB) before they enter workflow state; the full
+  result stays retrievable from the store. Without this, one pathological
+  document inflates history through a single tool call.
+- The child returns `ExtractionResult` only. No messages cross to the parent.
+- "Why is this field missing?" is answered by `FieldGap{field_path, reason,
+  documents_searched[]}` — small, and what the console renders. The
+  transcript's audience is the demo operator, not the analyst.
+
+Deferred to the spec, not a design question: `call_llm` re-sends the
+conversation each iteration, so Anthropic prompt caching would cut cost and
+latency. Cache breakpoints are activity-internal and therefore invisible to
+the workflow, so they cannot affect determinism.
+
+**PII — no `PayloadCodec` now, seam built in.** History holds EINs, dates of
+birth, addresses, and ID numbers, and the Temporal UI renders them. A codec
+would encrypt payloads but turn the UI into ciphertext, destroying what
+decisions 6 and 9 made the primary observability surface.
+
+The sharpest form of the question is already answered for free: **the documents
+never enter Temporal at all** — they live in the store and travel as refs, a
+choice made for payload-size reasons. The most sensitive artifacts, the scans
+themselves, are never in the orchestrator's database.
+
+For the structured remainder: synthetic data, no codec, and the data converter
+constructed in one place chosen by env var, so enabling encryption later is
+configuration rather than surgery. The spec documents what the codec-server
+variant adds (a fifth process plus `--codec-endpoint` wiring on the UI and
+CLI), making it a ready follow-up increment. Rejected for now because
+encryption is not in the seven-step story and decision 4 committed to one
+headline. Noted as the strongest candidate for the next increment, since
+encryption at rest is table stakes in a bank's evaluation.
+
+**`ApplicationFields` schema.** Sized to be credible to a banker and readable
+on one screen. Grounded in CIP (name, address, TIN, DOB for individuals) and
+BOI (owners ≥25%, plus a control person).
+
+- **Business:** `legal_name`, `dba`*, `entity_type`, `formation_date`,
+  `formation_state`, `tax_id`, `registered_address`, `business_address`,
+  `industry_code`, `phone`*, `website`*
+- **`beneficial_owners[]`:** `full_name`, `dob`, `ownership_pct`,
+  `residential_address`, `id_type`, `id_number`
+- **`control_person`:** `full_name`, `title`, `dob`, `residential_address`,
+  `id_type`, `id_number`
+
+(* optional. `gaps` is computed as required-and-unfilled, so the schema marks
+required vs. optional.) Authorized signatory is a **flag** on the control
+person, not a duplicate block.
+
+Document → field mapping, which is what makes the loop real:
+
+| Document | Fields |
+|----------|--------|
+| articles_of_incorporation | legal_name, entity_type, formation_date, formation_state, registered_address |
+| business_license | dba, business_address, industry_code |
+| ein_letter | tax_id |
+| w9 | tax_id, legal_name *(confirmation)* |
+| ownership_declaration | beneficial_owners[], control_person |
+
+`tax_id` appears in **two** documents. So if the EIN letter is illegible the
+correct behavior is to try the W-9 — reasoning that arises from the data rather
+than from a script.
+
+**The deliberate gap:** the `acme-corp` set is complete *except* one beneficial
+owner's `dob`. Ownership declarations routinely list names and percentages
+without dates of birth, so the gap is realistic rather than contrived. The
+agent searches every document, fails, escalates; the analyst fills it at the
+review gate — decision 8's handoff and decision 2's segregation of duties
+landing on the same field. `ownership_pct` ≤ 100 is where the schema and the
+`submit_review` validator meet.
+
+One sample client (`acme-corp`) to start. A second set with a harder gap is a
+cheap later addition, not scope now.
+
+### Remaining walkthrough sections
+
+3. The human gate — timeout policy, reject/re-extract loop, SLA escalation
+4. Failure and retry behavior — retry policies, the ambiguous-timeout
+   choreography, what is non-retryable
+5. The console's functional surface — states, what the review form shows
+6. Testing strategy — the executable verification gate
+
 ## Persona research (2026-09-04)
 
 Quick web research to settle whether "the accountant" in the raw notes was a
@@ -379,7 +620,7 @@ Sources:
 ## Open questions remaining
 
 None. All design questions are settled — decisions 1–4 in session 1,
-decisions 5–10 in session 2.
+decisions 5–11 in session 2 (11 confirms a choice that had been implicit).
 
 Next step is not another question, it is the rest of Stage 1: approaches with
 trade-offs where any remain, the design presented section by section, then the
@@ -436,7 +677,8 @@ references read during session 1.
 ## Status
 
 Stage 1 (Design) — questions complete. Decisions 1–4 from session 1
-(2026-09-03), 5–10 from session 2 (2026-09-04); decision 2 revised in session 2.
+(2026-09-03), 5–11 from session 2 (2026-09-04); decision 2 revised in session 2.
+Walkthrough sections 1–2 approved; 3–6 remain.
 
 **Resume at:** the sectioned design walkthrough, then write the spec to
 `docs/superpowers/specs/2026-MM-DD-customer-onboarding-design.md`. Hard gate
