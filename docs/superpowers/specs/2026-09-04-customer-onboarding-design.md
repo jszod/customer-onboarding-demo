@@ -41,7 +41,17 @@ and see its blast radius. The inversion is the contribution.
 
 - **Primary:** driven live by a Temporal SE on a customer call, on a laptop.
 - **Secondary:** a readable repo someone can clone and run.
+- **Third — the fallback audience:** the customer, **in the event this demo is
+  never built.** If the call falls back to a generic canned AI demo, the design
+  itself is still worth walking a customer through. That reader has no runbook
+  and no code — only diagrams and reasoning. §21 specifies that deliverable.
 - **Not:** a workshop artifact. Runbook choices favour the laptop case (§14).
+
+**The third audience has a scheduling consequence, stated here because it is
+counter-intuitive:** the customer-shareable artifact must be built **early**,
+not as final polish. Its entire purpose is to survive the demo not being
+completed, so producing it last guarantees it is absent in precisely the
+scenario it exists for. See §20.2, track E.
 
 ## 3. Domain and personas
 
@@ -899,6 +909,8 @@ moving anything.
 ```
 CLAUDE.md                  run/test commands, task queue, IDs, determinism rule
 CONTRACT.md                the §6 wire surface, SDK-agnostic
+TALK_TRACK.md              the narration for a live or design-only walkthrough
+docs/DESIGN-DIAGRAMS.md    three annotated mermaid diagrams (§21)
 Makefile                   forwards to python/
 make/common.mk             shared process management
 documents/acme-corp/       committed sample PDFs (text-layer)
@@ -1191,12 +1203,12 @@ Task 1 (sequential — everything gates on it)
   §5 models · §16.8 scenario manifest as skipped stubs · §17 config
   · Makefile + make/common.mk skeleton
                               │
-   ┌──────────────┬───────────┴────────────┬────────────────────┐
-   A: worker      B: gateway + console     C: core banking      D: sample docs
-   workflows/     web/gateway.py           core_banking/app.py  documents/acme-corp/
-   activities/    web/static/
-   prompts.py
-   └──────────────┴───────────┬────────────┴────────────────────┘
+   ┌──────────────┬───────────┴────────────┬────────────────────┬──────────────────┐
+   A: worker      B: gateway + console     C: core banking      D: sample docs     E: design artifact
+   workflows/     web/gateway.py           core_banking/app.py  documents/         docs/DESIGN-DIAGRAMS.md
+   activities/    web/static/                                   acme-corp/         TALK_TRACK.md
+   prompts.py                                                                      (§21)
+   └──────────────┴───────────┬────────────┴────────────────────┴──────────────────┘
                               │
               fixtures (needs A + D)          §16.7 step 2
                               │
@@ -1209,6 +1221,11 @@ Task 1 (sequential — everything gates on it)
 documents; histories require a runnable end-to-end stack; replay tests require
 committed histories. No amount of parallelism compresses that chain — it is a
 genuine data dependency, not a scheduling artifact.
+
+**Track E depends on nothing but this spec**, so it can start immediately and
+in parallel with task 1. It is the only track that must complete even if every
+other track is abandoned (§2, §21), so a planner should schedule it **first
+among the parallel tracks**, not last.
 
 **Track A is itself splittable** — `workflows/onboarding.py` and
 `workflows/extraction.py` meet only at `ExtractionRequest`/`ExtractionResult`
@@ -1234,7 +1251,69 @@ one track and should be written once in task 1, then treated as append-only:
 components that do not exist yet.** A stub target that fails with "not
 implemented" is cheaper than three agents editing the same Makefile.
 
-## 21. Open items
+## 21. The customer-shareable design artifact
+
+**Purpose:** if this demo is never built, the design is still worth walking a
+customer through. The call falls back to a generic canned AI demo, and this
+artifact is what gets shared and narrated instead. **A design in prose is not
+sufficient for that conversation** — it needs pictures.
+
+Built early (§2, §20.2 track E). Depends only on this spec.
+
+### 21.1 Deliverables
+
+| File | Contents |
+|------|----------|
+| `docs/DESIGN-DIAGRAMS.md` | Three mermaid diagrams with numbered callouts |
+| `TALK_TRACK.md` | The narration — follows `canonical-ai-demo`'s precedent |
+| Published Artifact | The same content as a private page with a shareable link |
+
+**Mermaid is the single source.** It is text, so it versions and reviews in a
+diff; it renders on GitHub; and Artifacts render mermaid natively, so the
+shareable page uses the same source rather than a second copy that drifts.
+
+### 21.2 The three diagrams
+
+**1. Topology** — the main picture. Must show:
+
+- `OnboardingWorkflow` with its seven steps, and which are activities
+- `ExtractionAgentWorkflow` as a child, with the attempt loop back to step 2
+- The signal / update / query surface (§6), labelled by primitive
+- The external systems: core banking, the document store, Claude
+- Which boundaries carry **refs rather than content** (§8.2)
+
+**2. The ambiguous-timeout sequence** — the headline (§10.1). A sequence
+diagram across analyst → workflow → `open_account` → core banking, showing the
+5s timeout firing while the server keeps working, the retry with the same
+idempotency key, the `duplicate` response, and the ledger holding one account.
+This is the diagram that sells the design; it earns its own page.
+
+**3. The agent loop** — request documents → `call_llm` → extract → gap →
+escalate, with **activity vs. inline clearly distinguished** (§8.1), because
+"only one thing here is an activity" is the point a technical audience will
+ask about.
+
+### 21.3 Annotation requirement
+
+Every diagram carries **numbered callouts** keyed to short explanations. A
+diagram that only makes sense with the author in the room fails the purpose in
+§2 — the fallback audience may read it after the call, or without a Temporal SE
+present.
+
+Each callout answers *why this shape*, not *what this is*. "Child workflow so a
+rejected attempt gets fresh history" beats "child workflow."
+
+### 21.4 What this artifact must not become
+
+- **Not the spec.** No retry-policy tables, no env vars, no repo layout. It
+  answers *what is the design and why*, in the language of the business
+  process.
+- **Not a Temporal tutorial.** Primitives are named where they explain a
+  decision, not enumerated for their own sake.
+- **Not dependent on the demo running.** No screenshots of the console or the
+  Temporal UI, because in the fallback scenario neither exists.
+
+## 22. Open items
 
 None. Every question raised in Stage 1 is settled above or explicitly cut in
 §18. If an implementing agent finds a genuine gap, the ruling procedure is:
