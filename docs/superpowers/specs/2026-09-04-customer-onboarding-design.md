@@ -100,10 +100,60 @@ reasons apply here:
    child with a fresh history rather than resuming a poisoned conversation.
    This is the reason that survives a skeptical reviewer.
 
-### 4.3 No continue-as-new
+### 4.3 No continue-as-new, and why this is not an entity workflow
 
-Parent history is ~7 activities plus a handful of signals and updates. The
-child is iteration-capped at `MAX_ITERATIONS`. Neither approaches 10k events.
+**The distinction is whether the workflow terminates.** An entity workflow's
+lifetime is the lifetime of a *thing* — a subscription, a cart, a customer
+relationship. It has no natural end, receives events indefinitely, and
+accumulates history forever, so it needs continue-as-new to reset.
+
+`OnboardingWorkflow`'s lifetime is the lifetime of a *process instance*. It
+starts on submission, runs seven steps, and completes with `OnboardingResult`.
+One application, one run, then done.
+
+The days-long waits make it *feel* like an entity workflow, but waiting is not
+accumulating: a workflow blocked on `wait_condition` for a week adds **zero**
+events while it waits.
+
+**The event budget.** Activities produce ~3 events each.
+
+| Per attempt | Events |
+|-------------|--------|
+| `ingest_documents` | ~3 |
+| child workflow start + completion | ~4 |
+| SLA timers (started + fired/cancelled) | ~4 |
+| `submit_review` update | ~3 |
+| **subtotal** | **~14** |
+
+Three attempts worst case ≈ 42, plus the tail (`open_account`,
+`send_documents`, `notify`, the client-ID signal, workflow start/complete) ≈
+15. **Under 100 events**, against a 10,000-event concern threshold — two orders
+of magnitude of headroom.
+
+**Two facts make that hold, and both matter:**
+
+1. **Activity retries are free.** `core/patterns.md`, in the polling section:
+   *"Individual Activity retries are not recorded in Workflow History."* So
+   `open_account` retrying twenty times against a dead core banking service
+   costs no history growth. This is why the headline failure (§10.1) cannot
+   threaten the bound.
+2. **Inline workflow tools produce no events.** §8.1's tools are function calls
+   mutating workflow state — not activities, not commands, nothing in history.
+   The child's history is only its `call_llm` activities: 8 iterations × ~3
+   events ≈ 24.
+
+**`MAX_ATTEMPTS` and `MAX_ITERATIONS` are therefore load-bearing in two ways** —
+business rules *and* the history bound. They are not arbitrary limits. Removing
+either invalidates this section, and continue-as-new would then need
+reconsidering.
+
+**For contrast, what an entity workflow would be here:** a
+`ClientRelationshipWorkflow` living for the life of the customer, handling
+periodic KYC refresh (banks re-review clients every 1–3 years), address
+changes, adverse-media hits, and beneficial-ownership updates. Unbounded events
+over years — that one genuinely needs continue-as-new, and it would start an
+`OnboardingWorkflow` as a child on day one. A plausible follow-up demo, and the
+clean illustration of the difference.
 
 ## 5. Data model
 
@@ -185,7 +235,17 @@ class DocumentRef(BaseModel):
 
 class DocumentManifest(BaseModel):
     refs: list[DocumentRef]
+
+class IngestRequest(BaseModel):
+    client_key: str
+    attempt: int                           # working dir is per-attempt
 ```
+
+`ingest_documents` copies from `documents/<client_key>/` into
+`<DOCUMENT_STORE>/<client_key>/<attempt>/`, hashes each file, and returns the
+manifest. A per-attempt working directory is what lets a rejected attempt pick
+up newly added documents without disturbing the previous attempt's refs — which
+remain valid for replay.
 
 Document → field mapping. This is what gives the agent loop something genuine
 to do:
@@ -225,6 +285,50 @@ class ExtractionResult(BaseModel):
     escalated: bool
 ```
 
+### 5.3.1 The model call
+
+```python
+class AgentTurn(BaseModel):                # one structured turn, ~1-2KB
+    role: Literal["assistant", "tool"]
+    content: str
+
+class LLMRequest(BaseModel):
+    model: str
+    manifest: DocumentManifest             # ids + kinds only
+    requested_doc_ids: list[str]           # activity resolves these to text
+    turns: list[AgentTurn]
+    required_field_paths: list[str]
+    prior_gaps: list[FieldGap] = []
+    analyst_note: str | None = None
+
+class DocumentRequest(BaseModel):
+    kind: Literal["request_documents"] = "request_documents"
+    doc_ids: list[str]
+    rationale: str
+
+class ExtractionSubmission(BaseModel):
+    kind: Literal["submit_extraction"] = "submit_extraction"
+    application: ApplicationFields
+    gaps: list[FieldGap]
+
+class Escalation(BaseModel):
+    kind: Literal["escalate"] = "escalate"
+    gaps: list[FieldGap]
+
+class LLMResponse(BaseModel):
+    action: DocumentRequest | ExtractionSubmission | Escalation   # discriminated on `kind`
+    turn: AgentTurn
+    usage: dict[str, int]                  # logged for cost tracking
+```
+
+`LLMRequest` carries **document ids, never document text.** The activity
+resolves `requested_doc_ids` against the store on every call. `LLMResponse` is
+already coerced and validated by the activity (§8.3), so the workflow
+dispatches on `action.kind` and stores the result — it never parses.
+
+`usage` is logged at activity level per `core/ai-patterns.md`'s cost-tracking
+guidance.
+
 ### 5.4 Review
 
 ```python
@@ -260,6 +364,44 @@ class ClientIdAssignment(BaseModel):
     core_ref: str
     assigned_at: datetime
 ```
+
+### 5.5.1 Delivery
+
+```python
+class SendDocumentsRequest(BaseModel):
+    client_key: str
+    client_id: str
+    legal_name: str
+    application: ApplicationFields         # final, post-merge
+
+class SendDocumentsResult(BaseModel):
+    packet_uri: str                        # written under OUTBOX_DIR
+    page_count: int
+
+class NotifyRequest(BaseModel):
+    client_key: str
+    client_id: str | None
+    outcome: Literal["completed", "manual_intervention", "rejected_by_core"]
+    recipients: list[Literal["onboarding_specialist", "end_client", "supervisor"]]
+    packet_uri: str | None = None
+    detail: str
+
+class NotifyResult(BaseModel):
+    delivered_to: list[str]
+```
+
+`send_documents` writes a welcome-pack file under `OUTBOX_DIR` and returns its
+path — a **reference, not content**, consistent with §8.2. `notify` appends to
+a notification log the console renders; it does not send real email or SMS.
+
+`notify` is also the activity used for the SLA reminder and escalation in §9.2,
+with `recipients` set accordingly — one activity, three callers, rather than
+three near-identical activities.
+
+Both are idempotent by construction: `send_documents` writes to a
+deterministic path derived from `client_key` and `client_id`, so a retry
+overwrites rather than duplicating, and `notify` appends a record keyed by
+`(client_key, outcome, recipients)`.
 
 `OpenAccountAck` deliberately **does not** carry the client ID. That is the
 point of the async return path. `status: "duplicate"` is the proof the
@@ -386,14 +528,34 @@ one file and touches neither the parent nor `CONTRACT.md`.
 ### 8.1 The loop
 
 **The child has exactly one activity: `call_llm`.** Every tool is an inline
-workflow tool, because every tool mutates only agent state — which
-`core/ai-patterns.md` Pattern 3 places in workflow code, not activities.
+workflow tool.
 
-| Tool | Kind | Effect |
-|------|------|--------|
-| `request_documents(doc_ids)` | inline | appends to `requested_docs` in workflow state |
-| `submit_extraction(application, gaps)` | inline, terminal | ends the loop |
-| `escalate(gaps)` | inline, terminal | ends the loop with `escalated=True` |
+| Tool | Kind | Effect | I/O? |
+|------|------|--------|------|
+| `request_documents(doc_ids)` | inline | appends ids to `requested_docs` in workflow state | **none** |
+| `submit_extraction(application, gaps)` | inline, terminal | stores the result, ends the loop | **none** |
+| `escalate(gaps)` | inline, terminal | sets `escalated=True`, ends the loop | **none** |
+
+**No tool performs I/O. Nothing here reads the disk.** This is the first thing
+a reviewer will challenge — "shouldn't anything that can fail be an activity?"
+— so the answer is stated rather than left to inference.
+
+`core/ai-patterns.md` draws exactly this line:
+
+- **Pattern 2** — *"Tools which are non-deterministic and/or heavy actions
+  (file system, hitting APIs, etc.) should be placed in activities."*
+- **Pattern 3** — *"tools which mutate agent state and are deterministic (like
+  TODO tools, just updating a hash map) typically belong in the workflow code
+  rather than an activity."*
+
+All three tools above are Pattern 3 — hash-map updates against workflow state.
+The file system is touched only by `call_llm`, which is Pattern 2: an activity
+with a 120s timeout and a retry policy, so a failed or slow document read
+retries rather than breaking the loop.
+
+Validation of `doc_ids` against the manifest is likewise a pure check — the
+manifest is already in workflow state. An unknown id returns an error to the
+model as a tool result; it is not an exception.
 
 Loop:
 
@@ -436,6 +598,18 @@ Reaching `MAX_ITERATIONS` without a terminal tool is treated as
 - **Client retries disabled** (`max_retries=0`) — Temporal owns all retry
   behaviour.
 - Structured output via Pydantic response schemas.
+- **`call_llm` returns validated models. The workflow never parses raw model
+  output.** Coercing the model's structure into `ApplicationFields` — dates,
+  decimals, enums — happens inside the activity, so:
+  - the workflow only ever stores structures already known-good;
+  - malformed model output is a **retryable activity failure**, which is the
+    correct handling, rather than an exception raised in workflow code;
+  - no parsing logic sits on the determinism-critical path, where a
+    locale- or clock-dependent parse would be a latent replay bug.
+
+  `LLMResponse` therefore carries a discriminated union — a document request, a
+  completed extraction, or an escalation — each already typed. The workflow
+  dispatches on it and does nothing else.
 - Sample documents are **text-layer PDFs**; `call_llm` extracts text with
   `pypdf` internally. Vision over page images is a documented upgrade, not the
   default — text extraction is more reliable on stage.
