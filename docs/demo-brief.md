@@ -202,8 +202,8 @@ store, mints refs, and starts the workflow **with refs only** (never bytes —
 2MB payload cap). No multipart, no file picker, no upload widget. Real
 drag-and-drop is future work and needs no backend change.
 
-Store: a local directory behind a docker volume suffices; MinIO if it should
-look like S3.
+Store: a plain local directory (see decision 10 — no Docker), with the gateway
+copying submitted sets into a working directory it can reset.
 
 **Worker-kill stays CLI** — killing a process is more convincing at a terminal
 than behind a button. Temporal UI carries the durability narrative.
@@ -290,6 +290,62 @@ v2.34.6 or later** — the spec must pin a minimum server/UI version.
 Sources: [Enriching the UI — Python](https://docs.temporal.io/develop/python/platform/enriching-ui),
 [Label your agent steps](https://temporal.io/blog/label-your-agent-steps)
 
+### 10. Runbook — host processes, no Docker
+
+Four host processes, driven by a Makefile:
+
+| Process | How it runs |
+|---------|-------------|
+| Temporal dev server | `temporal server start-dev --ui-port 8233` |
+| Worker | `uv run` |
+| Gateway + operator console | `uv run uvicorn ...` |
+| Fake core-banking service | `uv run uvicorn ...` (holds the idempotency ledger) |
+
+Pattern copied from `canonical-ai-demo/make/common.mk`: `pgrep` guards so
+targets are idempotent, `nohup` with logs to `/tmp`, `pkill -f` on `down`, and
+`up` printing the URLs at the end.
+
+**No Docker at all in local dev.** Canonical's compose file exists solely for
+Postgres, and we have no Postgres — Temporal is our state store, the document
+store is a directory, and the core-banking idempotency ledger is a SQLite file
+or in-memory. Copying canonical's pattern faithfully therefore leaves nothing
+to containerize.
+
+Why, given the alternative was compose-for-everything:
+
+- Docker's real payoff is *"someone with only Docker installed can run this."*
+  The primary use case is Joe running it on his own laptop, where that benefit
+  is theoretical.
+- Containerizing the worker, gateway, and core-banking service means
+  containerizing the code we edit most — pure friction, image rebuilds on
+  every workflow change.
+- `uv.lock` already pins the Python environment, which was the strongest
+  pro-Docker argument (returning to the repo after months).
+- The dev server is a single binary that boots in seconds and ships the UI.
+
+**Targets:**
+
+| Target | Purpose |
+|--------|---------|
+| `up` / `down` / `status` / `logs` | canonical's verbs, kept for muscle memory across demos |
+| `demo` | the one that matters — reset state, start everything, print/open the URLs |
+| `worker` / `kill-worker` / `restart-worker` | the worker-kill beat. Deliberately not a bare `kill`; canonical distinguishes `kill-worker` from `kill-db`, and ambiguity mid-demo is bad |
+| `test` | the executable verification gate — pytest, time-skipping, replay |
+| `demo-reset` | wipe application state so the demo re-runs cleanly next call |
+| `client-id` | fire the core-banking callback from the CLI, as a fallback if the console button misbehaves on stage |
+| `fixtures` | re-record extraction fixtures from a live run (decision 3 requires recorded, not hand-written) |
+| `clean` | `down` keeps state; `clean` removes it |
+
+**What would flip this to Docker:** turning the repo into a self-serve artifact
+for customers or SEs, or running it in a workshop where fifteen laptops'
+Python installs can't be debugged. If that happens, follow canonical's
+precedent — Dockerfiles under `docker/` for deployment, kept out of the local
+dev path.
+
+**Alternative rejected:** a `justfile` (what `temporal-agent-harness` uses) is
+nicer to write, but Makefile matches the demo siblings and consistency wins for
+something run in front of people.
+
 ## Persona research (2026-09-04)
 
 Quick web research to settle whether "the accountant" in the raw notes was a
@@ -323,7 +379,7 @@ Sources:
 ## Open questions remaining
 
 None. All design questions are settled — decisions 1–4 in session 1,
-decisions 5–9 in session 2.
+decisions 5–10 in session 2.
 
 Next step is not another question, it is the rest of Stage 1: approaches with
 trade-offs where any remain, the design presented section by section, then the
@@ -333,7 +389,8 @@ Details deferred to the spec (mechanics, not open design questions):
 
 - Which sample client(s) ship in `documents/` and the exact field schema the
   extraction targets
-- Document store choice — local directory behind a docker volume vs. MinIO
+- Document store layout — where the gateway copies submitted sets, and what
+  `demo-reset` clears
 - SLA timer duration and what escalation actually does
 - Minimum Temporal server / UI version to pin (≥ UI v2.34.6 for activity
   summaries on the Timeline — see decision 9)
@@ -379,7 +436,7 @@ references read during session 1.
 ## Status
 
 Stage 1 (Design) — questions complete. Decisions 1–4 from session 1
-(2026-09-03), 5–9 from session 2 (2026-09-04); decision 2 revised in session 2.
+(2026-09-03), 5–10 from session 2 (2026-09-04); decision 2 revised in session 2.
 
 **Resume at:** the sectioned design walkthrough, then write the spec to
 `docs/superpowers/specs/2026-MM-DD-customer-onboarding-design.md`. Hard gate
