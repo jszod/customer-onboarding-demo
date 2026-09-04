@@ -185,12 +185,13 @@ rules, patterns, and troubleshooting references.
 ## Current status
 
 - [x] Repo created
-- [ ] **Stage 1 — Design.** In progress. The demo story is now settled: a
-      deterministic onboarding process with a contained AI extraction step,
-      headlining the ambiguous-timeout / idempotency failure. Four of eight
-      design questions answered — see
-      [demo-brief.md](demo-brief.md#decisions-settled-2026-09-03-brainstorming-session-1).
-      Resume at open question 5 (how the client ID returns).
+- [x] **Stage 1 — Design.** Eleven decisions settled, six-section design
+      walkthrough approved, spec written to
+      [`docs/superpowers/specs/2026-09-04-customer-onboarding-design.md`](superpowers/specs/2026-09-04-customer-onboarding-design.md)
+      and self-reviewed. Decision reasoning and rejected alternatives are in
+      [demo-brief.md](demo-brief.md).
+- [ ] **Awaiting human review of the spec** — the hard gate. No code until
+      this clears.
 - [ ] Stage 2 — Plan
 - [ ] Stage 3 — Build
 - [ ] Stage 4 — Verify

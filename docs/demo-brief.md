@@ -680,6 +680,13 @@ Stage 1 (Design) — questions complete. Decisions 1–4 from session 1
 (2026-09-03), 5–11 from session 2 (2026-09-04); decision 2 revised in session 2.
 Walkthrough sections 1–2 approved; 3–6 remain.
 
-**Resume at:** the sectioned design walkthrough, then write the spec to
-`docs/superpowers/specs/2026-MM-DD-customer-onboarding-design.md`. Hard gate
-still stands — no code until that spec is approved.
+Walkthrough §1–6 complete. **Spec written** to
+[`docs/superpowers/specs/2026-09-04-customer-onboarding-design.md`](superpowers/specs/2026-09-04-customer-onboarding-design.md)
+and self-reviewed.
+
+**Resume at:** human review of the spec. Hard gate still stands — no code until
+it is approved. After approval the only next step is
+`superpowers:writing-plans`.
+
+From here the spec is the binding authority. This brief remains the record of
+*why* each decision was made and what was rejected.
