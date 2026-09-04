@@ -165,6 +165,131 @@ Temporal's answer is two-part, and legible in about fifteen seconds:
 **AI escalation is a feature beat, not the crisis.** The agent failing to find
 a required field is graceful degradation and belongs in step 2's narration.
 
+## Decisions settled (2026-09-04, brainstorming session 2)
+
+### 5. Client ID return path — signal
+
+Submit side was already settled by decision 4: synchronous call, idempotency
+key derived from the workflow ID, retry policy. The return path is a
+**signal** — core banking POSTs to a gateway endpoint that signals the
+workflow by ID. The SLA timer is the fallback if the callback never arrives.
+
+Chosen over:
+
+- *Async activity completion* — more precise (one timeout covers the whole
+  pending operation, retries if no callback lands), but a reader of the
+  workflow file sees an activity that mysteriously never returns. Bad for a
+  teaching demo.
+- *Polling* — most realistic for legacy cores and needs no inbound endpoint,
+  but the workflow looks busy rather than idle, which loses the "asleep for
+  days at zero cost" point.
+
+### 6. UI — single-page operator console
+
+Decision 5 already forces a gateway with an inbound endpoint, so the question
+was how many pages, not whether to have a web surface. **One page, three
+controls, one per actor:**
+
+| Control | Actor | What it does |
+|---------|-------|--------------|
+| "Submit application for Acme Corp" | Onboarding Specialist | POSTs the client key; gateway loads sample docs and starts the workflow |
+| Review & approve form | KYC Analyst | Shows extracted fields, signals approval |
+| "Return client ID" | Core banking | Fires the decision-5 callback signal |
+
+**Document intake:** `POST /applications {client: "acme-corp"}` — the gateway
+reads the baked-in `documents/acme-corp/` directory, writes to a document
+store, mints refs, and starts the workflow **with refs only** (never bytes —
+2MB payload cap). No multipart, no file picker, no upload widget. Real
+drag-and-drop is future work and needs no backend change.
+
+Store: a local directory behind a docker volume suffices; MinIO if it should
+look like S3.
+
+**Worker-kill stays CLI** — killing a process is more convincing at a terminal
+than behind a button. Temporal UI carries the durability narrative.
+
+### 7. SDK scope — Python only, `CONTRACT.md` written alongside
+
+Build the Python worker only. No Go/Java/TS workers now. But write the
+SDK-agnostic contract — task queue, workflow IDs, signal/update/query names,
+payload shapes — from the start, because:
+
+- Those names must be decided in the spec regardless; one table costs nothing.
+- Retrofitting later means reverse-engineering names already baked into code,
+  which is how the sibling demos ended up doing it.
+
+### 8. Agent child — hand-rolled, adapted from canonical-ai-demo
+
+A hand-rolled ReAct loop, not `temporal-agent-harness`.
+
+**What canonical gives us.** `canonical-ai-demo/python/workflows/agent.py` has
+the pieces already: `_think()` wrapping `call_llm` in an activity,
+`_dispatch()` routing tool calls, `_run_plain_tool()`, and
+`_await_confirmation()` (its own comment: *"survives a worker restart and
+costs nothing while waiting"*). Plus `activities/llm.py`, 120 lines, with
+error classification done. We take those and **drop** its conversational
+surface — transcript, chat updates, queries — because our child is a bounded
+batch job, not a chat. Our loop ends up smaller than its 447 lines.
+
+**What we give up.** The harness's standardized event stream (live-watch and
+replay-what-the-agent-did observability) and its policy engine's sophistication
+— layered rules, per-tool allow-lists, "approve and stop asking." We need
+*one* approval gate: a `workflow.wait_condition`, about ten lines. Code Mode,
+callback tools, multi-agent composition, typed agent interfaces, and the
+Gemini / OpenAI-Agents / Pydantic-AI integrations are all off this demo's
+path. The genuine loss is the observability stream — partially recovered by
+decision 9.
+
+**Swapping to the harness later is cheap, but not because we designed for it.**
+The harness is invasive where it touches (`@agent.defn`, `AgentWorkflowRunner`,
+`@agent.activity_tool_defn`) — you rewrite the file rather than adapt into it.
+That is fine, because **the child-workflow boundary from decision 1 already is
+the compatibility layer**: the parent starts a child with a typed input and
+gets a typed result, so a swap changes one file and touches neither the parent
+nor `CONTRACT.md`. Designing to the harness's experimental API would buy
+nothing the boundary does not already provide.
+
+Also weighed: the harness is explicitly experimental with changing APIs — a
+recurring maintenance tax on a demo that gets re-run on calls.
+
+### 9. Label every step with User Metadata
+
+Temporal's **User Metadata** feature, applied throughout. Temporal's own blog
+post [Label your agent steps](https://temporal.io/blog/label-your-agent-steps)
+describes exactly our problem: an agent loop produces N indistinguishable
+`call_llm` activities.
+
+| Where | API | Limit |
+|-------|-----|-------|
+| Workflow start | `static_summary=`, `static_details=` | 200 bytes / 20KB |
+| During execution | `workflow.set_current_details(...)` | — |
+| Activity | `execute_activity(..., summary=...)` | 200 bytes |
+| Timer | `workflow.sleep(..., summary=...)` | 200 bytes |
+
+Markdown, excluding images/HTML/scripts.
+
+Applied here:
+
+- Parent: `static_summary="Onboard Acme Corp — business account"`, and
+  `set_current_details()` updated per stage so the two long waits read as
+  *"Awaiting KYC review"* and *"Awaiting client ID from core banking"* rather
+  than as an idle workflow.
+- Activities: `summary="Extract fields from articles of incorporation"`,
+  `summary="Submit account request to core banking"`.
+- Timer: `workflow.sleep(..., summary="KYC review SLA — 7 days")`.
+- Agent child: each iteration labelled with its step and gap —
+  *"Extract — attempt 2, tax_id missing"*.
+
+**This is a spec requirement, not polish.** Decision 6 made the Temporal UI
+the primary observability surface, and this partially recovers the harness
+event stream given up in decision 8.
+
+**Version floor:** activity summaries on the Timeline require **Temporal UI
+v2.34.6 or later** — the spec must pin a minimum server/UI version.
+
+Sources: [Enriching the UI — Python](https://docs.temporal.io/develop/python/platform/enriching-ui),
+[Label your agent steps](https://temporal.io/blog/label-your-agent-steps)
+
 ## Persona research (2026-09-04)
 
 Quick web research to settle whether "the accountant" in the raw notes was a
@@ -197,35 +322,21 @@ Sources:
 
 ## Open questions remaining
 
-5. **External system model** — how does the approved client ID get back into
-   the workflow? Submit-side is settled by decision 4 (synchronous call,
-   idempotency key, retry policy). The return path is open:
-   - *Signal* — core banking POSTs to a gateway endpoint that signals the
-     workflow by ID. Most readable, matches what customers build, best picture
-     of a workflow sleeping for days at zero cost. SLA timer as fallback.
-     **Current recommendation.**
-   - *Async activity completion* — `open_account` completes out-of-band via
-     task token. More precise for an unreliable callback (one timeout covers
-     the whole pending operation, retries if no callback lands), but advanced;
-     a reader sees an activity that mysteriously never returns.
-   - *Polling* — no callback; infrequent-polling pattern
-     (`backoff_coefficient=1`, retries stay out of history). Most realistic
-     for legacy cores and fully self-contained with no inbound endpoint, but
-     the workflow looks busy rather than idle.
+None. All design questions are settled — decisions 1–4 in session 1,
+decisions 5–9 in session 2.
 
-   **This is where session 1 stopped** — user asked to clarify before
-   answering.
+Next step is not another question, it is the rest of Stage 1: approaches with
+trade-offs where any remain, the design presented section by section, then the
+spec written to `docs/superpowers/specs/`.
 
-6. **UI** — is there a web surface (like `canonical-ai-demo`'s `web/`) or is it
-   CLI/Temporal-UI driven? Note this interacts with question 5: a signal-based
-   return path wants an inbound HTTP endpoint, though `temporal workflow
-   signal` covers it CLI-only. It also decides how much the no-API-key setup
-   friction from decision 3 actually costs — self-serve repo vs. driven live
-   on a call.
-7. **SDK scope** — Python-only, or an SDK-agnostic `CONTRACT.md` so Go/Java/TS
-   workers can follow?
-8. **Agent child implementation** — `temporal-agent-harness` or a hand-rolled
-   ReAct loop? Raised by decision 1; not yet asked.
+Details deferred to the spec (mechanics, not open design questions):
+
+- Which sample client(s) ship in `documents/` and the exact field schema the
+  extraction targets
+- Document store choice — local directory behind a docker volume vs. MinIO
+- SLA timer duration and what escalation actually does
+- Minimum Temporal server / UI version to pin (≥ UI v2.34.6 for activity
+  summaries on the Timeline — see decision 9)
 
 ## Design constraints from the Temporal SDK references
 
@@ -267,9 +378,9 @@ references read during session 1.
 
 ## Status
 
-Stage 1 (Design) — in progress. Questions 1–4 settled; **resume at open
-question 5** (external system model), then 6, 7, and 8.
+Stage 1 (Design) — questions complete. Decisions 1–4 from session 1
+(2026-09-03), 5–9 from session 2 (2026-09-04); decision 2 revised in session 2.
 
-Still ahead in Stage 1 after the questions: 2–3 approaches with trade-offs,
-the design presented section by section, then the spec written to
-`docs/superpowers/specs/2026-MM-DD-customer-onboarding-design.md`.
+**Resume at:** the sectioned design walkthrough, then write the spec to
+`docs/superpowers/specs/2026-MM-DD-customer-onboarding-design.md`. Hard gate
+still stands — no code until that spec is approved.
