@@ -878,7 +878,8 @@ case (§2), and `uv.lock` already pins the environment.
 | `up` / `down` / `status` / `logs` | canonical's verbs, for muscle memory across demos |
 | `demo` | reset state, start everything, print the URLs |
 | `worker` / `kill-worker` / `restart-worker` | the worker-kill beat. **Not** a bare `kill` — ambiguity mid-demo is bad |
-| `test` | the verification gate (§16) |
+| `test` | run the suite — the verification gate (§16) |
+| `verify` | `test` plus `skipped == 0`; the machine-checkable definition of done (§16.8) |
 | `demo-reset` | clear the ledger, outbox, and working document store |
 | `client-id` | fire the callback from the CLI, as a fallback if the console button misbehaves on stage |
 | `fixtures` | re-record extraction fixtures from a live run |
@@ -1036,8 +1037,63 @@ changes, or the document set changes. A fixture that no longer matches the
 current prompt is worse than no fixture, so `make fixtures` is a deliberate act
 and its output is reviewed in the diff.
 
-**Stage 2 consequence: task 1 is this harness, not a feature.** Everything
-downstream gates on it.
+### 16.8 The scenario manifest — the definition of done
+
+**The twenty-two scenarios below are exhaustive. The build is complete when all
+twenty-two pass and none are skipped.** This exists so completeness is a
+*command*, not a judgement an agent makes about its own work. Prose an agent
+must re-read and self-assess against is how a run ends with six tests written
+and a confident report of success.
+
+**Task 1 writes all twenty-two as `@pytest.mark.skip` stubs**, named by ID,
+with the scenario text as the docstring. Every subsequent turn can then run
+`make test` and read remaining skips as remaining work.
+
+| ID | Scenario | §  |
+|----|----------|----|
+| `T-ACT-01` | `ingest_documents` copies files and returns refs; missing file raises non-retryable | 16.1 |
+| `T-ACT-02` | `call_llm` error classification: 401 non-retryable, 429 sets `next_retry_delay`, 5xx retryable | 16.1 |
+| `T-ACT-03` | `open_account` twice with the same idempotency key: second returns `duplicate` | 16.1 |
+| `T-WF-01` | Happy path completes with `status="completed"` and a client ID | 16.2 |
+| `T-WF-02` | Reject increments `attempt` and re-runs `ingest_documents` | 16.2 |
+| `T-WF-03` | `MAX_ATTEMPTS` exhausted → `manual_intervention` | 16.2 |
+| `T-WF-04` | Approve with a required field empty → validator rejects the update | 16.2 |
+| `T-WF-05` | Approve without `attested` → validator rejects | 16.2 |
+| `T-WF-06` | `sum(ownership_pct) > 100` → validator rejects | 16.2 |
+| `T-WF-07` | Timeout then duplicate → workflow proceeds, ledger holds exactly one account | 16.2 |
+| `T-WF-08` | Core rejects the application → `rejected_by_core` | 16.2 |
+| `T-WF-09` | `ChildWorkflowError` counts as a spent attempt | 16.2 |
+| `T-TIME-01` | Remind fires at `SLA_REMIND`, escalate at `SLA_ESCALATE`, workflow still waiting | 16.3 |
+| `T-TIME-02` | **Far past both SLAs, stage is still `awaiting_review`** — never auto-approves | 16.3 |
+| `T-TIME-03` | `CLIENT_ID_SLA` fires and does not abandon the workflow | 16.3 |
+| `T-CHILD-01` | EIN letter illegible → the loop requests the W-9 and finds `tax_id` | 16.4 |
+| `T-CHILD-02` | `dob` absent everywhere → `escalated=True` with `documents_searched` populated | 16.4 |
+| `T-CHILD-03` | `MAX_ITERATIONS` reached → `escalated=True`, no exception raised | 16.4 |
+| `T-REPLAY-01` | Happy-path history replays clean | 16.5 |
+| `T-REPLAY-02` | Reject-loop history replays clean | 16.5 |
+| `T-REPLAY-03` | Timeout-retry history replays clean | 16.5 |
+| `T-REPLAY-04` | Escalation history replays clean | 16.5 |
+
+The four `T-REPLAY-*` rows are one scenario per committed history, generated
+together in §16.7 step 4.
+
+**`make verify` asserts `skipped == 0` and all tests pass.** That is the
+machine-checkable finish line — the thing `DEVELOPMENT-PROCESS.md` calls the
+executable verification gate.
+
+**The wrinkle, stated so nobody trips on it.** A pre-written stub cannot import
+modules that do not exist yet, so all twenty-two start as skip-marked
+placeholders — a *manifest*, not TDD. Each task then converts its own stubs
+into real failing tests and makes them pass. TDD holds *within* a task; the
+manifest gives the global checklist *between* tasks.
+
+**Adding a scenario is allowed; silently dropping one is not.** If an
+implementing agent finds a case this list misses, it adds a row with a new ID
+and logs the addition as a ruling (§19). Removing a row requires the same, with
+the reason.
+
+**Stage 2 consequence: task 1 is this harness and this manifest, not a
+feature.** Everything downstream gates on it.
 
 ## 17. Configuration
 
@@ -1107,7 +1163,78 @@ Ranked by likelihood of being hit:
 7. **If the store is missing a document listed in the manifest**, that is a
    non-retryable `ingest_documents` failure → the attempt is spent.
 
-## 20. Open items
+## 20. Parallelization structure
+
+**Input to Stage 2, not the plan itself.** The task breakdown is
+`superpowers:writing-plans`' job. What follows are the dependency facts that
+are *design* information, recorded so a planner does not have to infer them —
+inference is where parallel plans go wrong.
+
+### 20.1 What is genuinely independent
+
+Three components import **zero** worker code and depend only on §5 models and
+the §6 contract. This is not incidental; it is why §15 splits the tree this
+way and what decision 7's `CONTRACT.md` buys.
+
+| Component | Depends on | Does **not** depend on |
+|-----------|------------|------------------------|
+| `web/` (gateway + console) | §6 wire surface, §6.1 endpoints, §5.6 `OnboardingStatus`, `ReviewSubmission` | any workflow or activity implementation |
+| `core_banking/` | `OpenAccountRequest`, `OpenAccountAck`, `ClientIdAssignment`, §11 behaviour | Temporal entirely — it only speaks HTTP |
+| `documents/acme-corp/` | §5.2 document kinds, §8.4 deliberate gap | all code |
+
+`core_banking/` is the strongest case: it never imports `temporalio` at all.
+
+### 20.2 The dependency shape
+
+```
+Task 1 (sequential — everything gates on it)
+  §5 models · §16.8 scenario manifest as skipped stubs · §17 config
+  · Makefile + make/common.mk skeleton
+                              │
+   ┌──────────────┬───────────┴────────────┬────────────────────┐
+   A: worker      B: gateway + console     C: core banking      D: sample docs
+   workflows/     web/gateway.py           core_banking/app.py  documents/acme-corp/
+   activities/    web/static/
+   prompts.py
+   └──────────────┴───────────┬────────────┴────────────────────┘
+                              │
+              fixtures (needs A + D)          §16.7 step 2
+                              │
+              histories (needs A + B + C)     §16.7 step 4
+                              │
+              T-REPLAY-01…04                  §16.5
+```
+
+**Why the tail is sequential:** fixtures require a working loop and real
+documents; histories require a runnable end-to-end stack; replay tests require
+committed histories. No amount of parallelism compresses that chain — it is a
+genuine data dependency, not a scheduling artifact.
+
+**Track A is itself splittable** — `workflows/onboarding.py` and
+`workflows/extraction.py` meet only at `ExtractionRequest`/`ExtractionResult`
+(§5.3), which task 1 already fixed. The parent can be built against a stub
+child (§16.0) while the child is built independently. This is decision 1's
+child-workflow boundary paying off a second time.
+
+### 20.3 Shared-file hazards
+
+Worktree isolation prevents agents from disturbing each other's working tree
+but does **not** prevent merge conflicts. These files are touched by more than
+one track and should be written once in task 1, then treated as append-only:
+
+| File | Why it collides |
+|------|-----------------|
+| `python/models/` | every track imports it |
+| `Makefile`, `make/common.mk` | each track wants to add its own target |
+| `python/config.py` | each track adds env vars |
+| `CONTRACT.md` | derived from §6; write once, do not let tracks edit it |
+| `pyproject.toml` | each track adds dependencies |
+
+**Rule: task 1 writes these completely, including targets and env vars for
+components that do not exist yet.** A stub target that fails with "not
+implemented" is cheaper than three agents editing the same Makefile.
+
+## 21. Open items
 
 None. Every question raised in Stage 1 is settled above or explicitly cut in
 §18. If an implementing agent finds a genuine gap, the ruling procedure is:
