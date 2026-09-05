@@ -3,6 +3,7 @@
 The ledger is the thing the workflow cannot see: it is the proof surface for
 "exactly one account" after an ambiguous timeout (§10.1).
 """
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -75,6 +76,9 @@ def test_assign_posts_the_client_id_to_the_gateway_callback(client, monkeypatch)
         sent["url"], sent["json"] = url, json
         class R:
             status_code = 202
+
+            def raise_for_status(self):
+                return None
         return R()
 
     monkeypatch.setattr("core_banking.app.httpx.post", fake_post)
@@ -121,3 +125,55 @@ def test_no_module_in_the_package_imports_temporalio_or_the_worker():
                 if name.split(".")[0] in forbidden:
                     offenders.append(f"{path.name}: {name}")
     assert offenders == []
+
+
+def test_a_refused_callback_does_not_lose_the_assigned_client_id(client, monkeypatch):
+    """The ID is minted and persisted BEFORE the callback goes out, so a
+    gateway that is down cannot be answered with a bare 500: the workflow
+    would sit in `awaiting_client_id` with no idea an ID exists for it."""
+    def refuse(url, json, timeout):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr("core_banking.app.httpx.post", refuse)
+    request_id = client.post("/accounts", json=_req()).json()["request_id"]
+    resp = client.post(f"/accounts/{request_id}/assign")
+
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert "CL-" in detail, "the operator has to be told the ID exists"
+    assert "again" in detail.lower(), "and that redelivering it is the recovery"
+
+    account = [a for a in client.get("/ledger").json()["accounts"]
+               if a["request_id"] == request_id][0]
+    assert account["client_id"], "the assignment is persisted regardless"
+
+
+def test_reassigning_redelivers_rather_than_minting_a_second_id(client, monkeypatch):
+    """The recovery path the 502 above points at. `assign_client_id` returns
+    the original row, so pressing the button again is safe."""
+    sent = []
+
+    def refuse(url, json, timeout):
+        raise httpx.ConnectError("connection refused")
+
+    def accept(url, json, timeout):
+        sent.append(json)
+        class R:
+            status_code = 202
+
+            def raise_for_status(self):
+                return None
+        return R()
+
+    request_id = client.post("/accounts", json=_req()).json()["request_id"]
+    monkeypatch.setattr("core_banking.app.httpx.post", refuse)
+    client.post(f"/accounts/{request_id}/assign")
+    first = [a for a in client.get("/ledger").json()["accounts"]
+             if a["request_id"] == request_id][0]["client_id"]
+
+    monkeypatch.setattr("core_banking.app.httpx.post", accept)
+    resp = client.post(f"/accounts/{request_id}/assign")
+
+    assert resp.status_code == 200
+    assert sent[0]["client_id"] == first, "the same ID, redelivered"
+    assert len(client.get("/ledger").json()["accounts"]) == 1
