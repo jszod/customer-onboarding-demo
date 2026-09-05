@@ -156,6 +156,41 @@ preserved verbatim, so Task 13's fixtures can rely on them.
 
 ---
 
+## R-005 — `notify`'s dedupe key includes `detail`
+
+**Task 12. `python/activities/delivery.py`.** A genuine spec/plan conflict,
+adjudicated in favour of the plan.
+
+§5.5.1's prose says `notify` "appends a record keyed by
+`(client_key, outcome, recipients)`". The plan's Step 3 code keys on
+`(client_key, outcome, sorted(recipients), detail)` — four parts, not three.
+
+**Ruling: keep the plan's four-part key.** Normally the spec outranks the plan,
+but here the literal prose breaks a different part of the spec.
+
+Both keys satisfy the actual requirement, which is idempotency under retry: a
+Temporal retry re-delivers the identical `NotifyRequest`, `detail` included, so
+neither key appends twice. The three-part key does something extra and
+unwanted — it suppresses notifications that are genuinely *distinct events*.
+Confirmed against the plan directly: Task 17's reminder is emitted with
+`detail=f"KYC review {tier}: attempt {self._attempt} has ..."` (plan line
+4530), and §9.2 restarts the review timer per attempt. Under the literal
+three-part key, attempt 2's reminder to `["onboarding_specialist"]` matches
+attempt 1 on all three fields and is silently dropped from
+`notifications.json` — which is the console's source (§13). The same applies to
+the client-ID chase loop at plan line 4553.
+
+So the literal §5.5.1 reading makes §9.2's per-attempt reminders invisible in
+§13's console. Where two parts of the spec pull apart, the reading that
+preserves observable behaviour wins; §5.5.1's tuple is describing the
+idempotency property, not specifying an exact dedupe key.
+
+Pinned by `test_notify_keeps_distinct_reminders`, so the choice is reviewable
+rather than incidental. To reverse it: drop `detail` from `key` and delete that
+one test — and accept that per-attempt reminders stop appearing in the log.
+
+---
+
 ## Closed — `make verify`'s false green between Tasks 1 and 3
 
 Recorded in Task 1: `make verify` printed "VERIFY OK: 22/22 scenarios
