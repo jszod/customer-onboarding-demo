@@ -595,3 +595,50 @@ Applying the rule of two, from this task's evidence:
 - **Unlimited retry turns a defect into a hang** — the existing note covered
   workflow tasks; extended to activities, since the symptom and the diagnosis
   differ. Second occurrence.
+
+---
+
+## R-014 — the open question, settled: `field_edits` is not scoped to gaps
+
+**Task 15.** R-011 left this for this task, because widening it changes what
+lands in `field_edits`, which this task's validator owns.
+
+**The ruling: the workflow contract is open.** `field_edits` may target any
+path — an escalated gap, an optional field, or a field the model already
+filled in. Three things say so and nothing says otherwise:
+
+- §9.1 justifies choosing an *update* over a signal on the grounds that "the
+  analyst can *edit* field values (correcting data is much of what KYC review
+  is)". A contract that only accepts gap paths does not support that sentence.
+- §19.3 already requires accepting an edit to an **optional** field. An
+  optional field is never a gap, so the narrow reading contradicts a ruling the
+  spec makes explicitly.
+- §18's nine cuts do not include this one. Narrowing it would be a tenth,
+  unstated.
+
+Correcting a value the model read wrongly — a transposed EIN digit, a
+misparsed formation date — is the ordinary case in KYC review, not an edge
+case. Pinned by `test_an_edit_to_a_field_that_is_not_a_gap_is_accepted`, which
+edits one required field and one optional one and reads the merged value back
+out of the `status` query.
+
+No code change was needed: `gaps.apply_edits` already walked any path, and the
+validator re-checks the whole merged application rather than the edited subset.
+The contract was open; nothing had proved it.
+
+**Deferred, deliberately, and named: the console's field table.** The other
+half of R-011 is that `web/static/index.html` renders the "N fields extracted
+& verified" table read-only, so the demo cannot show the beat this ruling
+authorises. That is not settled by this task and should not be smuggled into
+it: the table is the console's most designed surface, §13 makes its visual
+design Stage 3 work under the `frontend-design` skill, and Task 15's declared
+files are the workflow and its tests. Doing it here would mean editing an
+890-line page and its test file under a task that claims to touch neither.
+
+**It is now a scoped piece of work, not an open question:** add inputs to the
+grouped table, collect them into the same `field_edits` array the gap panel
+already builds, and extend `tests/test_console.py`'s
+`test_review_payload_matches_review_submission` to cover a non-gap edit. The
+validator will accept it today. **Task 18 is the right home** — it is the next
+task that opens the console — and if it is not done there, the demo's review
+beat stays narrower than §9.1 describes.

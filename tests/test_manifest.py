@@ -66,19 +66,31 @@ async def test_T_WF_03_max_attempts_exhausted_is_manual_intervention(env):
     await test_T_WF_03_max_attempts_exhausted_is_manual_intervention(env)
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_WF_04_approve_with_empty_required_field_is_rejected():
-    """The validator refuses an approve while a required field is empty."""
+async def test_T_WF_04_approve_with_empty_required_field_is_rejected(env):
+    """The validator refuses an approve while a required field is empty.
+
+    Delegates to tests/test_review_validator.py::test_T_WF_04_approve_with_empty_required_field_is_rejected.
+    """
+    from tests.test_review_validator import test_T_WF_04_approve_with_empty_required_field_is_rejected
+    await test_T_WF_04_approve_with_empty_required_field_is_rejected(env)
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_WF_05_approve_without_attestation_is_rejected():
-    """The validator refuses an approve without attested=True."""
+async def test_T_WF_05_approve_without_attestation_is_rejected(env):
+    """The validator refuses an approve without attested=True.
+
+    Delegates to tests/test_review_validator.py::test_T_WF_05_approve_without_attestation_is_rejected.
+    """
+    from tests.test_review_validator import test_T_WF_05_approve_without_attestation_is_rejected
+    await test_T_WF_05_approve_without_attestation_is_rejected(env)
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_WF_06_ownership_over_100_is_rejected():
-    """sum(ownership_pct) > 100 -> validator rejects. Note <=, not ==."""
+async def test_T_WF_06_ownership_over_100_is_rejected(env):
+    """sum(ownership_pct) > 100 -> validator rejects. Note <=, not ==.
+
+    Delegates to tests/test_review_validator.py::test_T_WF_06_ownership_over_100_is_rejected.
+    """
+    from tests.test_review_validator import test_T_WF_06_ownership_over_100_is_rejected
+    await test_T_WF_06_ownership_over_100_is_rejected(env)
 
 
 @pytest.mark.skip(reason=SKIP)

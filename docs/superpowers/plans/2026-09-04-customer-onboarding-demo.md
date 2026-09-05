@@ -4605,6 +4605,8 @@ equivalent information goes into set_current_details instead."
 
 ### Task 18: The progress tracker — TRACK A
 
+**Also settle R-014's deferred half here.** The console's "N fields extracted & verified" table is read-only; R-014 ruled that `field_edits` accepts any path and the validator already does. Add inputs to the grouped table, collect them into the same `field_edits` array the gap panel builds, and extend `tests/test_console.py::test_review_payload_matches_review_submission` to cover a non-gap edit. Without it the demo's review beat stays narrower than §9.1 describes.
+
 §12. One `stage` value, two surfaces. The console draws a stepper; the Temporal UI renders the same information as Current Details.
 
 **Files:**
