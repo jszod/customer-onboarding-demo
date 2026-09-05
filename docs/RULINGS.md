@@ -279,6 +279,38 @@ seconds during the core-banking beat and freeze the console's polling.
 
 ---
 
+## R-008 — `ingest_documents`: paths, unreadable files, and replay-stable refs
+
+**Task 9. `python/activities/ingest.py`.**
+
+**Source `documents/` is anchored at the repo root, not the working directory.**
+The plan's `Path("documents")` is cwd-relative, so a worker started from
+anywhere but the repo root would fail ingest *non-retryably* and burn one of
+`MAX_ATTEMPTS` for what is a configuration mistake, not a document problem.
+Resolved from `__file__` instead.
+
+**An unreadable PDF is non-retryable, not just a missing one.** §10.2's
+non-retryable column reads "file missing / **unreadable**"; the plan's snippet
+handled only "missing", so a corrupt scan would have retried three times before
+failing for a reason no retry could improve. Now raises `DocumentUnreadable`.
+
+**`uri` is written with `.as_posix()`.** Refs go into workflow history, and
+Task 20's replay tests must pass against histories captured on any machine. A
+Windows-style separator baked into a committed history would be a
+non-determinism failure that looks like a code bug.
+
+**Follow-up, deliberately deferred:** a `DOCUMENTS_DIR` env override was added,
+read directly in `ingest.py` rather than through `config.settings()`, because
+the implementer was barred from editing `python/config.py` while three other
+agents were running. It exists so §19.7's real case is testable — a document
+set that is *present but missing one of the five* — which is impossible to
+exercise against the committed complete set. This is in mild tension with §17's
+"configuration in exactly one place". **It should move into `Settings` when
+`config.py` is next open**; `config.py` is append-only per §20.3, so this is an
+addition, not a rewrite.
+
+---
+
 ## Closed — `make verify`'s false green between Tasks 1 and 3
 
 Recorded in Task 1: `make verify` printed "VERIFY OK: 22/22 scenarios

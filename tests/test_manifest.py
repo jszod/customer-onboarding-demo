@@ -13,9 +13,12 @@ SKIP = "not implemented — see the owning task in the plan"
 
 # --- §16.1 activity unit tests (Tasks 9, 10, 11) ---
 
-@pytest.mark.skip(reason=SKIP)
 def test_T_ACT_01_ingest_copies_and_hashes_documents():
     """ingest_documents copies files and returns refs; missing file raises non-retryable."""
+    from tests.test_activity_ingest import (assert_copies_and_hashes,
+                                            assert_missing_file_is_non_retryable)
+    assert_copies_and_hashes()
+    assert_missing_file_is_non_retryable()
 
 
 @pytest.mark.skip(reason=SKIP)
