@@ -11,14 +11,17 @@ and `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
 documents, core banking, the gateway, the console, all four activities, the
 extraction child, and the parent's loop and happy path.
 
-Suite: **174 passed, 4 skipped.** The 4 remaining skips are the T-REPLAY
-scenarios, which Task 20 owns — every other manifest scenario is live. That
-count is the progress bar, and `make verify` is correctly red until it reaches
-zero.
+Suite: **174 passed, 9 skipped.** Four skips are the T-REPLAY scenarios (Task
+20); five are `tests/test_fixtures.py`, skipped until the fixtures are
+recorded. That count is the progress bar, and `make verify` is correctly red
+until it reaches zero.
 
-**Task 19 needs `ANTHROPIC_API_KEY`** — it records the fixtures by running the
-extraction loop live (§16.7). It is the one step a human must supply something
-for, and it only happens once; the suite runs keyless forever after.
+**BLOCKED: Task 19 needs `ANTHROPIC_API_KEY`.** `tools/record_fixtures.py` is
+written and its guards are verified, but the recording itself has not happened —
+it runs the extraction loop live against the real documents (§16.7). Run
+`make fixtures` with a key set, review the recorded JSON in the diff, commit it.
+The suite is keyless from then on. **Task 20 cannot start until this is done**:
+`make histories` replays through the fixtures.
 
 **Tasks 19–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
 SDK downloads its own server binaries from `temporal.download` at runtime — the

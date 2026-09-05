@@ -103,3 +103,19 @@ it belongs in `make test-live`, not the default suite.
 
 After wiring the determinism guard and the replay tests, deliberately break
 determinism once, watch the gate fail, and revert.
+
+## A script in `tools/` needs the repo root on `sys.path` itself
+
+`pyproject.toml`'s `pythonpath = ["."]` applies to pytest, not to
+`uv run python tools/whatever.py` — that puts `tools/` on the path, so any
+`from python import ...` raises `ModuleNotFoundError` before the script's own
+checks run. Every `make` target here invokes these as plain scripts.
+
+Start any tool that imports the package with:
+
+```python
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+```
+
+`record_fixtures.py` shipped without it and would have failed on the one step a
+human has to run themselves (R-019).

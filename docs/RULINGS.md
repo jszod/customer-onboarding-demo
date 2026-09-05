@@ -799,3 +799,41 @@ has always been substring assertions, and this task added four more of them
 before anything checked that the feature functioned. `node --check` on the
 extracted script catches a syntax error in seconds; a headless browser catches
 the rest.
+
+---
+
+## R-019 — Task 19 is blocked on the API key; the recorder is built and verified as far as it can be
+
+**Task 19.** §16.7 step 2 records the fixtures by running the extraction loop
+live. `ANTHROPIC_API_KEY` is not set in this environment, so the recording did
+not happen. What could be done without it was done.
+
+**1. `make fixtures` would have failed on its first line.** `record_fixtures.py`
+is the first tool to import from the `python` package, and
+`uv run python tools/record_fixtures.py` puts `tools/` on `sys.path`, not the
+repo root — so `from python import config` raises `ModuleNotFoundError` before
+the key is even checked. pytest never sees this because `pyproject.toml` sets
+`pythonpath = ["."]` for the test run only; `make_documents.py` never saw it
+because it imports nothing from the package. Fixed with an explicit
+`sys.path.insert` and a comment, so the script works via `make` and when run
+directly. **Task 20's `capture_histories.py` will hit exactly this** — promoted
+to `testing.md` on that basis.
+
+**2. The recorder now says when a recording is unusable.** §8.4's missing date
+of birth is the demo's escalation beat, and the plan's Step 4 says that if the
+run does not escalate it, fix the prompt and re-record rather than hand-edit.
+Nothing said so at the point of recording. The script now prints a warning
+naming the failure and the correct remedy, because the person running this is
+running it once and will not have the plan open.
+
+**3. The tests skip rather than fail until the fixtures exist.**
+`pytest.mark.skipif(not FIXTURES.exists())` with the reason naming
+`make fixtures` and the key. The suite stays green and `make verify` stays
+correctly red — the five skips are the remaining work, which is what that gate
+is for. Committing five failing tests would have made the suite meaningless as
+a signal for everything else.
+
+**What is left:** run `make fixtures` with a key set, review the recorded JSON
+in the diff, commit it. The suite is keyless from then on. Task 20 needs the
+fixtures in place before it can capture histories, so the build is blocked here
+until someone supplies the key.
