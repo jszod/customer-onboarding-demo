@@ -750,6 +750,8 @@ race surface is already smaller than when this was written. That is a
 reduction, not a fix: the hypothesis is untested either way, and the
 session-scoped `env` above is still the change to make.
 
+**Closed by R-019 — sighting 3 arrived and carried the traceback.**
+
 ## R-017 — six defects found reviewing Task 13–17 before merge
 
 A code review of the workflow branch, run against the spec rather than the
@@ -933,3 +935,66 @@ pre-fix code. The two that did not are guards rather than pins and are labelled
 as such: one holds the new `TypeError` clause narrow, and one pins the
 atomic-write path, which cannot observe truncation without an actual crash
 mid-write. Suite: 124 passed → 140 passed, 19 skipped unchanged.
+
+
+## R-019 — the intermittent suite error, closed at sighting 3
+
+This entry closes *"Known weakness — the suite errors intermittently, twice
+seen, not reproduced"* above. That entry said the fix belonged to Task 20 **"or
+sooner on a third sighting"**. The third sighting arrived on the merge of
+`main` into the workflow branch, so this is that clause being honoured rather
+than a new decision.
+
+**What the third sighting added.** The first two were recorded as bare counts,
+one of them through `tail -2`, with the detail lost. This one carried the
+traceback:
+
+    RuntimeError: Failed starting Temporal dev server: Failed connecting to
+    test server after 5 seconds, last error: ... ConnectError("tcp connect
+    error", 127.0.0.1:42487, ConnectionRefused)
+
+That is the recorded hypothesis, confirmed: a function-scoped `env` boots a dev
+server per test, each claiming a port, each racing the next one's startup. It
+is a fixture error rather than a test failure for the same reason — the fault
+is in setup, and the test that happens to catch it is innocent. **Two sightings
+were enough to justify recording it and not enough to diagnose it; the third
+was only decisive because it was the one nobody piped through `tail`.** Capture
+the error before re-running, not after.
+
+**The fix.** `env` is now `scope="session", loop_scope="session"` — one server
+per run instead of roughly a dozen. `.claude/rules/testing.md` already
+sanctioned this (*"it is shareable via a pytest fixture"*), so no rule had to
+change to permit it; the rule now states the scopes and why they differ.
+
+`skip_env` stays function-scoped, and that asymmetry is the point. §16.3 says
+time-skipping environments cannot be shared, and these tests advance the clock
+by a year: one shared instance would let whichever test jumped forward first
+decide what "now" meant for every test after it — and that failure would
+present as another flake, which is precisely the hole this entry came out of.
+
+**The risk the old entry named, and what was actually done about it.** It
+warned that changing fixture scope "trades a rare unexplained error for a fresh
+class of cross-test interference". That is the right worry and it is testable:
+interference from a shared server would show as order-dependence. Four full
+runs in random order (`pytest-randomly` is on by default; `make verify` is the
+only thing that disables it) came back 177 passed / 4 skipped every time.
+
+Sharing is safe here for a specific, fragile reason worth writing down:
+**nothing in the suite shares names.** `run_worker` takes a fresh uuid4 task
+queue per test and every workflow id carries a uuid4, so two tests cannot see
+each other's workflows even on one server. A test that pins a fixed workflow id
+or task queue would break that, silently, and would look like a flake. Both the
+fixture docstring and the rule now say so.
+
+**Both scopes are pinned by `tests/test_fixture_scopes.py`,** asserted against
+pytest-asyncio's own fixture marker rather than by grepping the source — this
+repo has twice failed a source-grepping gate with a docstring, and a scope is a
+value that can be read directly. The guard was watched failing: reverting `env`
+to function scope fails it, which is the *"a gate nobody has seen fail is not
+known to work"* rule applied to the gate added in the same commit.
+
+**What is NOT claimed.** The error was never reproduced on demand, so this is a
+fix to the mechanism the traceback names, not a fix confirmed by watching the
+fault disappear. Absence over four runs is weak evidence — the fault was always
+rare. If it recurs with a session-scoped `env`, the port race was not the cause
+and this entry is wrong; the traceback is the thing to capture, again.
