@@ -30,7 +30,7 @@ separate prerequisite for `make demo`; see the README's Setup section.
 |----------|------------|
 | `docs/superpowers/specs/2026-09-04-customer-onboarding-design.md` | **The binding authority.** 22 sections. Settles everything. |
 | `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 21 tasks, 127 steps. How the spec gets built. |
-| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Read before Task 13 — it carries two recurring traps and one open question that Task 15 must settle. |
+| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. It still holds one open question that Task 15 must settle. |
 | `docs/demo-brief.md` | 11 numbered decisions with the reasoning and the **rejected** alternatives. |
 | `docs/DEVELOPMENT-PROCESS.md` | The four-stage process this repo follows. |
 

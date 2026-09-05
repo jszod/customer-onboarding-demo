@@ -34,6 +34,8 @@ Every task's requirements implicitly include this section. Values are copied ver
 - **Timeouts:** `ingest_documents` 30s · `call_llm` 120s · `open_account` **5s** · `send_documents` 60s · `notify` 30s (§10.2).
 - **Caps:** `MAX_ATTEMPTS=3`, `MAX_ITERATIONS=8` — these are the history bound, not arbitrary limits (§4.3).
 - **Exactly three optional application fields:** `dba`, `phone`, `website`. Everything else is required (§5.1).
+- **Log every deviation as a ruling in `docs/RULINGS.md`** — a gap the spec and plan both leave, or a place the plan's own code is wrong. Say what was decided, against which authority, and what it cost.
+- **At the Commit step, before writing the message, promote what you learned.** Re-read the rulings you added: does any of them meet the rule of two in `RULINGS.md`'s header — a second occurrence, or a fault that will bite a task you can name? If so, copy the short form into the matching file under `.claude/rules/` in the same commit. A ruling nobody reads before repeating the mistake bought nothing.
 
 ---
 

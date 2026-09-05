@@ -10,6 +10,33 @@ a ruling in the execution log" — but no task creates it. Task 1 does.
 Format: one entry per ruling, newest last. Say what was decided, against which
 authority, and what it cost.
 
+## Logging a ruling is half the job — promote it, or it will happen again
+
+This file is append-only and nobody reads it top to bottom. A ruling buried at
+entry 9 does not stop entry 14 from repeating it. Rules under `.claude/rules/`
+are different: they load by path scope, so they arrive in front of the person
+about to make the mistake.
+
+**The rule of two.** Promote a ruling into the matching rules file when either
+holds:
+
+1. **It has now happened twice.** Two instances is not bad luck, it is a
+   property of this codebase. Blocking I/O inside `async def` reached *three*
+   instances while staying a ruling, because nothing said when to promote it.
+2. **It will bite a task you can name.** R-012 was promoted on its first
+   occurrence because Tasks 14–18 copy the extraction child's shape, and two of
+   its three faults present as a hanging test rather than a failing one.
+
+Which file: `workflow-determinism.md` for anything under `python/workflows/`,
+`payloads-and-activities.md` for models, activities, config, web and core
+banking, `testing.md` for the suite and its gates. Promotion **copies the
+short form** — the rule states what to do and why in a few lines; the ruling
+keeps the full reasoning and the cost. Leave the ruling in place and do not
+rewrite history: the log is the record of how the rule was earned.
+
+**When to check:** at each task's Commit step, before writing the message. That
+is the moment the evidence is freshest and the cadence is already there.
+
 ---
 
 ## R-001 — `pgrep`/`pkill` guards must not match the invoking shell
