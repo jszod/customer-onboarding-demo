@@ -93,14 +93,22 @@ async def test_T_WF_06_ownership_over_100_is_rejected(env):
     await test_T_WF_06_ownership_over_100_is_rejected(env)
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_WF_07_timeout_then_duplicate_opens_exactly_one_account():
-    """THE HEADLINE. Workflow proceeds and the ledger holds exactly one account."""
+async def test_T_WF_07_timeout_then_duplicate_opens_exactly_one_account(env):
+    """THE HEADLINE. Workflow proceeds and the ledger holds exactly one account.
+
+    Delegates to tests/test_core_submission.py::test_T_WF_07_timeout_then_duplicate_opens_exactly_one_account.
+    """
+    from tests.test_core_submission import test_T_WF_07_timeout_then_duplicate_opens_exactly_one_account
+    await test_T_WF_07_timeout_then_duplicate_opens_exactly_one_account(env)
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_WF_08_core_rejection_completes_as_rejected_by_core():
-    """A non-retryable core rejection completes the workflow, not crashes it."""
+async def test_T_WF_08_core_rejection_completes_as_rejected_by_core(env):
+    """A non-retryable core rejection completes the workflow, not crashes it.
+
+    Delegates to tests/test_core_submission.py::test_T_WF_08_core_rejection_completes_as_rejected_by_core.
+    """
+    from tests.test_core_submission import test_T_WF_08_core_rejection_completes_as_rejected_by_core
+    await test_T_WF_08_core_rejection_completes_as_rejected_by_core(env)
 
 
 async def test_T_WF_09_child_workflow_error_counts_as_a_spent_attempt(env):

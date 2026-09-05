@@ -642,3 +642,49 @@ already builds, and extend `tests/test_console.py`'s
 validator will accept it today. **Task 18 is the right home** — it is the next
 task that opens the console — and if it is not done there, the demo's review
 beat stays narrower than §9.1 describes.
+
+---
+
+## R-015 — the core call retries in the workflow, not in the activity policy
+
+**Task 16.** The plan asks for this to be recorded, and it is a real deviation
+from §10.2.
+
+**What §10.2 says.** `open_account`: start_to_close 5s, "initial 1s, backoff
+2.0, max interval 10s, unlimited attempts". Read literally that is a
+`RetryPolicy` on the call site, and the SDK would honour it with no loop.
+
+**What was built.** `maximum_attempts=1` on the activity, wrapped in a
+`while True` in the workflow that increments `_core_attempt`, records
+`_last_error`, and backs off with `workflow.sleep(min(10, 2 ** (n - 1)))` —
+1s, 2s, 4s, 8s, 10s, 10s… That is §10.2's curve exactly, and unlimited as it
+requires. Only the location changed.
+
+**Why.** Activity retries are invisible to workflow state — that is the point
+of them — but §13 requires the console to show `core_attempt` and `last_error`
+*while the retry is happening*, and §12 wants the beat legible on the Timeline
+without opening an activity's detail pane. The headline of this entire demo is
+a retry the audience can watch. A retry nobody can see does not tell the story,
+and there is no way to surface an in-flight activity retry into a query.
+
+Pinned by `test_the_timeout_is_visible_in_status_while_it_retries`, which polls
+`status` during the failed attempt and asserts `last_error` reads
+`"attempt 1: ..."`. Without the loop that assertion cannot pass by any means.
+
+**The cost, stated plainly.** Each attempt now writes activity-scheduled,
+activity-failed and timer events to history rather than being folded into one
+activity's retry sequence. §4.3's budget has two orders of magnitude of
+headroom, so the cost is real but not close to mattering. The second cost is
+subtler: an implementer reading §10.2 will expect a `RetryPolicy` here and find
+`maximum_attempts=1`, which reads like the retry was disabled. Hence the
+comment at the call site pointing here.
+
+**Unlimited means unlimited.** If the core banking service never answers, this
+loop waits forever, and that is correct — §10.2 says unlimited attempts, and a
+bank's core coming back in an hour is the normal case. It is not a violation of
+§10.3's "every failure path ends in a business status": waiting is not a
+failure path. The non-retryable rejection, which is one, completes as
+`rejected_by_core`.
+
+**No promotions from this task.** Nothing here has happened twice, and the
+rule of two means what it says.

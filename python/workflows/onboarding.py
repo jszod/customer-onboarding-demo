@@ -14,7 +14,8 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError, ChildWorkflowError
+from temporalio.exceptions import (ActivityError, ApplicationError,
+                                  ChildWorkflowError)
 
 with workflow.unsafe.imports_passed_through():
     from python import config, gaps
@@ -129,17 +130,51 @@ class OnboardingWorkflow:
         """Filled in by Task 16. Kept as a separate method so Task 16 touches
         one place and Task 14's tests keep passing."""
         self._stage = "submitting_to_core"
-        ack: OpenAccountAck = await workflow.execute_activity(
-            "open_account",
-            OpenAccountRequest(idempotency_key=workflow.info().workflow_id,
-                               application=self._application),
-            result_type=OpenAccountAck,
-            start_to_close_timeout=timedelta(seconds=5),
-            retry_policy=RetryPolicy(initial_interval=timedelta(seconds=1),
-                                     backoff_coefficient=2.0,
-                                     maximum_interval=timedelta(seconds=10)),
-            summary="Submit account request to core banking")
+
+        # A workflow-level retry loop, NOT the activity retry policy. §10.2's
+        # table describes the policy shape -- initial 1s, backoff 2.0, max
+        # interval 10s, unlimited attempts -- and this reproduces it exactly,
+        # but as workflow-visible steps. Activity retries do not touch workflow
+        # state, and §13 requires the console to show `core_attempt` and
+        # `last_error` live while the retry is happening. See R-015.
+        while True:
+            self._core_attempt += 1
+            try:
+                ack: OpenAccountAck = await workflow.execute_activity(
+                    "open_account",
+                    OpenAccountRequest(
+                        # Stable across every retry. NEVER a retry counter --
+                        # that is the trap in §10.1 and it produces exactly the
+                        # duplicate account this design prevents.
+                        idempotency_key=workflow.info().workflow_id,
+                        application=self._application),
+                    result_type=OpenAccountAck,
+                    start_to_close_timeout=timedelta(seconds=5),
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                    summary=f"Submit account request to core banking "
+                            f"(attempt {self._core_attempt})")
+                break
+            except ActivityError as e:
+                cause = e.cause
+                if isinstance(cause, ApplicationError) and cause.non_retryable:
+                    # A business rejection: complete, do not crash (§10.3).
+                    self._last_error = _failure_message(e)
+                    return await self._finish(req, "rejected_by_core", None,
+                                              self._last_error)
+                self._last_error = (f"attempt {self._core_attempt}: "
+                                    f"{_failure_message(e)}")
+                await workflow.sleep(
+                    timedelta(seconds=min(10, 2 ** (self._core_attempt - 1))),
+                    summary=f"Backoff before core banking attempt "
+                            f"{self._core_attempt + 1}")
+
         self._core_request_id = ack.request_id
+        if ack.status == "duplicate":
+            # The proof the key worked: the first call did create the account,
+            # the answer was simply lost (§10.1).
+            workflow.logger.info(
+                "core banking returned duplicate for %s -- the idempotency key "
+                "prevented a second account", ack.request_id)
 
         self._stage = "awaiting_client_id"
         self._pending_since = workflow.now()

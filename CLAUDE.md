@@ -6,21 +6,22 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–15 have landed. Task 16 is next.** Skeleton and config, models
+**Plan Tasks 1–16 have landed. Task 17 is next.** Skeleton and config, models
 and `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
 documents, core banking, the gateway, the console, all four activities, the
 extraction child, and the parent's loop and happy path.
 
-Suite: **150 passed, 9 skipped.** The 9 skips are the manifest scenarios not
+Suite: **156 passed, 7 skipped.** The 7 skips are the manifest scenarios not
 yet implemented — that count is the progress bar, and `make verify` is
-correctly red until it reaches zero. T-ACT-01/02/03, T-CHILD-01/02/03 and
-T-WF-01 through 06 plus 09 are live.
+correctly red until it reaches zero. All nine T-WF scenarios, T-ACT-01/02/03
+and T-CHILD-01/02/03 are live; the headline timeout beat is pinned by
+T-WF-07.
 
-Task 16 is the headline: the ambiguous timeout and the core rejection. It fills
-in `_open_and_finish`, which Task 14 left as a separate method for exactly that
-reason.
+Task 17 replaces `_await_review`, which Task 14 left as a one-line method for
+exactly that reason, with the tiered SLA. **Read the never-auto-approve rule
+below before writing it** — `T-TIME-02` is the test that enforces it.
 
-**Tasks 16–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
+**Tasks 17–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
 SDK downloads its own server binaries from `temporal.download` at runtime — the
 only download host compiled into the Rust bridge — so that host must be
 reachable, or the work must run somewhere it already is. The Temporal CLI is a
