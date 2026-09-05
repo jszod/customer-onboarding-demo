@@ -6,19 +6,25 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–12 have landed. Task 13 is next.** Everything that does not
-need a running Temporal server is done: skeleton and config, models and
-`CONTRACT.md`, the 22-scenario manifest, the design artifact, sample documents,
-core banking, the gateway, the console, and all four activities.
+**Plan Tasks 1–13 have landed. Task 14 is next.** Everything that does not need
+the parent workflow is done: skeleton and config, models and `CONTRACT.md`, the
+22-scenario manifest, the design artifact, sample documents, core banking, the
+gateway, the console, all four activities, and the extraction child.
 
-Suite: **124 passed, 19 skipped.** The 19 skips are the manifest scenarios not
+Suite: **129 passed, 16 skipped.** The 16 skips are the manifest scenarios not
 yet implemented — that count is the progress bar, and `make verify` is
-correctly red until it reaches zero. T-ACT-01/02/03 are already live.
+correctly red until it reaches zero. T-ACT-01/02/03 and T-CHILD-01/02/03 are
+live.
 
-**Task 13 needs a Temporal server** (`WorkflowEnvironment.start_local`), as do
-Tasks 14–20. The SDK downloads its own server binaries from `temporal.download`
-at runtime — the only download host compiled into the Rust bridge — so that
-host must be reachable, or the work must run somewhere it already is.
+`python/worker.py` imports `python.workflows.onboarding`, which Task 14
+creates. Until then the worker does not start — that is expected, and the plan
+says not to stub it.
+
+**Tasks 14–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
+SDK downloads its own server binaries from `temporal.download` at runtime — the
+only download host compiled into the Rust bridge — so that host must be
+reachable, or the work must run somewhere it already is. The Temporal CLI is a
+separate prerequisite for `make demo`; see the README's Setup section.
 
 | Document | What it is |
 |----------|------------|

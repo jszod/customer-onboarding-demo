@@ -60,6 +60,17 @@ header; 5xx and connection errors are retryable.
 `max_retries=0`. Temporal owns all retry behaviour. A client that retries
 internally hides attempts from the history and from the console.
 
+## No blocking I/O inside `async def`
+
+`open()`, `Path.read_text()`, `sqlite3`, `time.sleep` and blocking HTTP all
+stall the event loop and every other activity the worker is running. Use
+`asyncio.to_thread`, or make the handler `def` and let the SDK run it in the
+thread pool.
+
+This is the single most repeated defect in this build — three instances so far:
+the gateway's control and assign endpoints, and `open_account`. Assume it is in
+any `async def` you write until you have checked.
+
 ## Activities are idempotent
 
 Temporal re-executes activities on retry and replay. `send_documents` writes to
@@ -72,5 +83,10 @@ not double-send.
 `web/gateway.py` drives workflows by **string name** only. That is what makes
 `CONTRACT.md` real rather than aspirational, and it is what would let a Go or
 TypeScript worker replace the Python one without touching the gateway.
+
+The cost of the string name is that nothing can infer the types: every
+`execute_workflow`, `start_workflow`, `query` and `execute_update` needs an
+explicit `result_type=`, or the converter hands back a bare `dict` that looks
+like a model until something touches an attribute.
 
 `core_banking/` never imports `temporalio` at all — it only speaks HTTP.

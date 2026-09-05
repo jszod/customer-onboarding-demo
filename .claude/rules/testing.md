@@ -48,6 +48,17 @@ The prompt changes, `ApplicationFields` changes, or the document set changes.
 `fixtures/README.md` carries the provenance so a stale fixture can be
 recognised as stale. Review the diff.
 
+## A test that greps source makes the prose in that file part of the test
+
+Several gates here scan source text — `execute_activity` appears exactly once
+in the extraction child, `"temporalio"` never appears in `core_banking/`,
+`"info().attempt"` never appears in `open_account`. A docstring or comment that
+*names the forbidden thing in order to warn about it* fails the gate as surely
+as real code would.
+
+This has already happened twice, both times to a docstring the plan itself
+supplied. Write around the string: "a retry counter", not the expression.
+
 ## Test environments
 
 Use `WorkflowEnvironment.start_local()` for most tests; it is shareable via a

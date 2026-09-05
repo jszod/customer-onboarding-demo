@@ -16,6 +16,42 @@ No I/O, no clocks, no randomness. Specifically: no `requests`, no `httpx`, no
 `tests/test_determinism_guard.py` greps for these. The SDK sandbox catches most
 of the rest at runtime.
 
+## Configuration is read at import time, never inside `run()`
+
+`config.settings()` reads `os.environ`, which the sandbox forbids during
+workflow execution. Call it inside `workflow.unsafe.imports_passed_through()`
+at module scope and bind the result to a module constant:
+
+```python
+with workflow.unsafe.imports_passed_through():
+    from python import config
+    SETTINGS = config.settings()
+```
+
+The sandbox is right to refuse: a workflow that re-read its config mid-run
+would replay differently after an env change.
+
+**Know the symptom, because it is not an error.** A restricted access fails the
+workflow *task*, and workflow tasks retry forever. The test does not fail — it
+hangs. If a workflow test never returns, fetch the history under a timeout
+(`asyncio.wait_for(handle.result(), ...)`, then `fetch_history_events()`) and
+read the task-failure message; do not sit through the timeout twice.
+
+## Calls by string name need `result_type`
+
+`workflow.execute_activity("call_llm", req, result_type=LLMResponse, ...)`. A
+type annotation on the receiving variable deserializes nothing — the converter
+has no signature to infer from, so without `result_type` it returns a bare
+`dict` and the next attribute access dies. Same for `execute_child_workflow`
+and for `execute_workflow` from a client or a test.
+
+## `maximum_attempts=0` means UNLIMITED, not none
+
+Zero is the default policy's value and is what §10.2 wants for `call_llm`. If
+you intend no retry, that is `maximum_attempts=1`. Read the spec before
+"fixing" a zero you find here — the classification inside the activity, not the
+policy, is what stops a 401.
+
 ## Big things by reference, small things by value
 
 Temporal records activity inputs **and** outputs. An agent loop that passes
