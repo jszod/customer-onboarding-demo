@@ -116,14 +116,30 @@ class StubExtractionChild:
 @pytest_asyncio.fixture
 async def skip_env():
     """Time-skipping environments CANNOT be shared between tests (§16.3), so
-    this is function-scoped like `env` and never reused."""
+    this one stays function-scoped and is never reused. Each test gets a clock
+    it can advance a year without touching anyone else's."""
     async with await WorkflowEnvironment.start_time_skipping(
             data_converter=config.build_data_converter()) as e:
         yield e
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def env():
+    """ONE dev server for the whole session (§16.3 -- `start_local` is
+    shareable, unlike `start_time_skipping`).
+
+    Function scope booted a server per test, roughly a dozen per run, each
+    claiming a port and each racing the next one's startup. That is the
+    documented cause of the intermittent `Failed connecting to test server
+    after 5 seconds` fixture error, and it was the third sighting that made
+    this worth doing.
+
+    Sharing is safe here because nothing in the suite shares NAMES: `run_worker`
+    takes a fresh uuid4 task queue per test and every workflow id carries a
+    uuid4, so two tests cannot see each other's workflows even on one server.
+    Adding a test that pins a fixed workflow id or task queue would break that,
+    and it is the thing to check before doing so.
+    """
     async with await WorkflowEnvironment.start_local(
             data_converter=config.build_data_converter()) as e:
         yield e
