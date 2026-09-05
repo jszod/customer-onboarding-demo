@@ -10,7 +10,11 @@ rather than three near-identical activities.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import tempfile
+from pathlib import Path
 
 from temporalio import activity
 
@@ -42,7 +46,7 @@ async def send_documents(req: SendDocumentsRequest) -> SendDocumentsResult:
         "Application on file:",
         json.dumps(req.application.model_dump(mode="json"), indent=2),
     ]
-    path.write_text("\n".join(body))
+    await asyncio.to_thread(_write_atomically, path, "\n".join(body))
     activity.logger.info("wrote welcome pack to %s", rel)
     return SendDocumentsResult(packet_uri=rel, page_count=1)
 
@@ -56,15 +60,67 @@ async def notify(req: NotifyRequest) -> NotifyResult:
     nothing; the §9.2 reminders, which differ only in `detail` (the attempt and
     how long the review has been pending), stay distinct.
     """
-    outbox = config.settings().outbox_dir
-    outbox.mkdir(parents=True, exist_ok=True)
-    log_path = outbox / "notifications.json"
-    log = json.loads(log_path.read_text()) if log_path.exists() else []
-
-    key = [req.client_key, req.outcome, sorted(req.recipients), req.detail]
-    if not any([r["client_key"], r["outcome"], sorted(r["recipients"]),
-                r["detail"]] == key for r in log):
-        log.append(req.model_dump(mode="json"))
-        log_path.write_text(json.dumps(log, indent=2))
+    record = req.model_dump(mode="json")
+    await asyncio.to_thread(_append_notification, record,
+                            [req.client_key, req.outcome,
+                             sorted(req.recipients), req.detail])
     activity.logger.info("notified %s: %s", req.recipients, req.detail)
     return NotifyResult(delivered_to=list(req.recipients))
+
+
+def _write_atomically(path: Path, text: str) -> None:
+    """Write via a temp file in the same directory, then rename.
+
+    `write_text` truncates first and writes second, so a worker killed between
+    the two leaves a half-written file behind. `os.replace` is atomic on POSIX
+    and on Windows: a reader sees either the old file or the new one.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _read_log(log_path: Path) -> list[dict]:
+    """The notification log, or an empty one if it cannot be read.
+
+    A truncated or hand-edited `notifications.json` must not be able to stop
+    the demo: every terminal status goes through `notify`, so an unhandled
+    decode error here retries forever on the default policy and NO workflow
+    ever reaches a terminal status -- a corrupt outbox file presenting as the
+    whole system hanging. The bad file is kept, renamed, rather than deleted:
+    it is evidence, and it is not what anyone is looking at.
+    """
+    if not log_path.exists():
+        return []
+    try:
+        log = json.loads(log_path.read_text())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        log = None
+    if not isinstance(log, list):
+        broken = log_path.with_suffix(".json.corrupt")
+        os.replace(log_path, broken)
+        activity.logger.warning(
+            "%s was unreadable; moved it to %s and started a new log",
+            log_path, broken)
+        return []
+    return log
+
+
+def _append_notification(record: dict, key: list) -> None:
+    log_path = config.settings().outbox_dir / "notifications.json"
+    log = _read_log(log_path)
+    if any([r.get("client_key"), r.get("outcome"),
+            sorted(r.get("recipients", [])), r.get("detail")] == key
+           for r in log if isinstance(r, dict)):
+        return
+    log.append(record)
+    _write_atomically(log_path, json.dumps(log, indent=2))

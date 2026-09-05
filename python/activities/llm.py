@@ -13,6 +13,7 @@ merely calling the activity.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from datetime import timedelta
@@ -118,12 +119,18 @@ async def live_call_llm(req: LLMRequest) -> LLMResponse:
         raise ApplicationError(
             "LLM outage toggled from the console (§10.4)", type="LLMOutage")
 
-    messages = [{"role": "user", "content": _user_content(req)}]
+    # Both legs are blocking: `_user_content` opens and parses PDFs, and the
+    # Anthropic client is the SYNCHRONOUS one, which can sit on a socket for
+    # `_CLIENT_TIMEOUT_SECONDS`. Run on the event loop they stall every other
+    # activity this worker is running, its workflow tasks, and its heartbeats
+    # -- the same defect R-009 fixed in `open_account`.
+    messages = [{"role": "user", "content": await asyncio.to_thread(_user_content, req)}]
     for turn in req.turns:
         messages.append({"role": "assistant" if turn.role == "assistant" else "user",
                          "content": turn.content})
     try:
-        message = _create_message(
+        message = await asyncio.to_thread(
+            _create_message,
             model=req.model, max_tokens=_MAX_TOKENS, system=prompts.SYSTEM,
             tools=prompts.TOOLS, tool_choice={"type": "any"}, messages=messages)
     except anthropic.AuthenticationError as e:
@@ -142,6 +149,19 @@ async def live_call_llm(req: LLMRequest) -> LLMResponse:
     except anthropic.APIConnectionError as e:
         raise ApplicationError(f"connection error: {e}",
                                type="ConnectionError") from e
+    except TypeError as e:
+        # No credentials resolve at all: the SDK constructs happily with
+        # `api_key=None` and raises a BARE TypeError from `messages.create`.
+        # It is not an `anthropic` error, so it misses every clause above,
+        # escapes the classification chain, and retries on the default
+        # unlimited policy -- a missing environment variable presenting as a
+        # workflow that hangs. It is a configuration fault: never retryable.
+        if "authentication" not in str(e).lower():
+            raise
+        raise ApplicationError(
+            f"no API credentials: {e}. Set ANTHROPIC_API_KEY, or run with "
+            f"FIXTURE_MODE=1 (§16.7).",
+            type="AuthenticationError", non_retryable=True) from e
 
     block = next((b for b in message.content if b.type == "tool_use"), None)
     if block is None:
@@ -183,5 +203,18 @@ async def fixture_call_llm(req: LLMRequest) -> LLMResponse:
             f"no fixtures at {path}; run `make fixtures` with an API key (§16.7)",
             type="FixturesMissing", non_retryable=True)
     sequence = json.loads(path.read_text())
-    index = min(len(req.turns), len(sequence) - 1)
-    return LLMResponse.model_validate(sequence[index])
+    if not sequence:
+        # `min(len(turns), -1)` is -1, which indexes the empty list and raises
+        # IndexError -- unclassified, so it retries forever.
+        raise ApplicationError(
+            f"{path} records no responses; re-run `make fixtures` (§16.7)",
+            type="FixturesMissing", non_retryable=True)
+    if len(req.turns) >= len(sequence):
+        # Past the end of the recording. Repeating the last turn forever is
+        # how a fixture set that is one response short presents as the agent
+        # looping to its iteration cap for no visible reason.
+        raise ApplicationError(
+            f"{path} records {len(sequence)} responses but the agent is on "
+            f"turn {len(req.turns) + 1}; re-record it (§16.7)",
+            type="FixturesExhausted", non_retryable=True)
+    return LLMResponse.model_validate(sequence[len(req.turns)])
