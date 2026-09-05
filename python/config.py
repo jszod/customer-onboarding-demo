@@ -74,3 +74,33 @@ def build_data_converter() -> DataConverter:
             "requires a codec server plus --codec-endpoint on the UI and CLI."
         )
     return pydantic_data_converter
+
+
+# §5.1: declared in exactly one place, so the console, the gaps list, and the
+# approve rule can never disagree.
+REQUIRED_FIELD_PATHS: tuple[str, ...] = (
+    "legal_name", "entity_type", "formation_date", "formation_state", "tax_id",
+    "registered_address", "business_address", "industry_code",
+    "beneficial_owners",
+    "beneficial_owners[].full_name", "beneficial_owners[].dob",
+    "beneficial_owners[].ownership_pct", "beneficial_owners[].residential_address",
+    "beneficial_owners[].id_type", "beneficial_owners[].id_number",
+    "control_person",
+    "control_person.full_name", "control_person.title", "control_person.dob",
+    "control_person.residential_address", "control_person.id_type",
+    "control_person.id_number",
+)
+
+# §5.2 — which document each field lives in; used for FieldGap.documents_searched
+FIELD_SOURCES: dict[str, tuple[str, ...]] = {
+    "legal_name": ("articles_of_incorporation", "w9"),
+    "entity_type": ("articles_of_incorporation",),
+    "formation_date": ("articles_of_incorporation",),
+    "formation_state": ("articles_of_incorporation",),
+    "registered_address": ("articles_of_incorporation",),
+    "tax_id": ("ein_letter", "w9"),
+    "dba": ("business_license",),
+    "business_address": ("business_license",),
+    "industry_code": ("business_license",),
+}
+_OWNERSHIP_SOURCES = ("ownership_declaration",)

@@ -77,6 +77,40 @@ the plan's would not have.
 
 ---
 
+## R-003 — `apply_edits` dumps with `warnings=False`
+
+**Task 2, Step 5. `python/gaps.py`.**
+
+The plan's `apply_edits` sets the analyst's raw string onto a typed field, then
+round-trips through `model_dump()` / `model_validate()` so the schema coerces
+it. That works — both edit tests pass — but between the `setattr` and the
+validate, a field declared `date` or `Decimal` is holding a `str`, and dumping
+that intermediate state makes pydantic emit:
+
+```
+UserWarning: Pydantic serializer warnings:
+  PydanticSerializationUnexpectedValue(Expected `date` — serialized value may
+  not be as expected [field_name='dob', input_value='1985-01-01', input_type=str])
+```
+
+**The ruling.** Pass `warnings=False` to that one `model_dump()`, with a
+comment saying why. The mis-typed intermediate is the mechanism, not a mistake.
+
+Rejected: restructuring the traversal to edit a plain dict instead of the
+model. Cleaner in principle, but it rewrites working logic for a cosmetic gain
+and risks a real bug in path handling.
+
+**Why it matters beyond tidiness.** Task 15's review validator exercises
+`apply_edits` on every submission, so the noise multiplies; and §9.1's audit
+rule — the merge that returns a new application — is a beat the demo narrates.
+A console printing serializer warnings each time the analyst fixes a field
+undercuts the moment.
+
+**Cost.** One keyword argument. Suppression is scoped to this call, so a
+genuine serialization problem anywhere else still surfaces.
+
+---
+
 ## Known transient — `make verify`'s message overstates until Task 3
 
 `make verify` prints "VERIFY OK: 22/22 scenarios implemented and passing"
