@@ -104,20 +104,23 @@ def test_T_TIME_03_client_id_sla_does_not_abandon_the_workflow():
 
 # --- §16.4 child workflow tests (Task 13) ---
 
-@pytest.mark.skip(reason=SKIP)
 def test_T_CHILD_01_illegible_ein_letter_falls_back_to_w9():
     """The cross-document behaviour. If this regresses, the demo's most
     interesting moment dies silently."""
+    from tests.test_extraction_workflow import assert_falls_back_to_w9
+    assert_falls_back_to_w9()
 
 
-@pytest.mark.skip(reason=SKIP)
 def test_T_CHILD_02_missing_dob_escalates_with_documents_searched():
     """dob absent everywhere -> escalated=True, documents_searched populated."""
+    from tests.test_extraction_workflow import assert_escalates_with_provenance
+    assert_escalates_with_provenance()
 
 
-@pytest.mark.skip(reason=SKIP)
 def test_T_CHILD_03_iteration_cap_escalates_without_raising():
     """MAX_ITERATIONS reached -> escalated=True, no exception."""
+    from tests.test_extraction_workflow import assert_cap_escalates
+    assert_cap_escalates()
 
 
 # --- §16.5 replay tests (Task 20) ---

@@ -471,3 +471,47 @@ Not fixed, because the honest fix — asserting the directory exists — would f
 the suite for the ten tasks before Task 13 creates it. The file-structure table
 locks the path, and Task 20's replay tests are the real determinism gate. If
 `python/workflows/` ever moves, this guard must move with it.
+
+---
+
+## R-012 — three defects in the plan's Task 13 code, all of which hang or lie
+
+The plan's Step 3 workflow does not run as written. Each fault was found by
+executing it, not by reading it, and each is worth naming because Tasks 14–18
+copy this shape.
+
+**1. `config.settings()` inside `run()` — the workflow hangs forever.**
+`settings()` reads `os.environ`, which the sandbox forbids at execution time:
+`RestrictedWorkflowAccessError`. That fails the workflow *task*, which retries
+indefinitely, so the symptom is not an error but a test that never returns. The
+sandbox is right — a workflow that re-read its config mid-run would replay
+differently after an env change. Moved to `SETTINGS = config.settings()` inside
+`workflow.unsafe.imports_passed_through()`, where it is an ordinary import-time
+read, frozen for the life of the worker. **Tasks 14–18 must do the same.**
+
+**2. A string-named activity needs `result_type`.** The plan writes
+`response: LLMResponse = await workflow.execute_activity("call_llm", ...)`. The
+annotation deserializes nothing; the converter has no signature to infer from
+and returns a bare `dict`, so the next line dies on `.turn`. Added
+`result_type=LLMResponse`. Same fault in the plan's test helper against
+`execute_workflow` — added `result_type=ExtractionResult` there.
+
+**3. `RetryPolicy(maximum_attempts=0)` reads as "no retries" and means the
+opposite.** Zero is unlimited. This is correct — §10.2 specifies the *default*
+policy for `call_llm`, and unlimited-with-backoff is that default — but it is
+correct by accident of a confusing spelling. I changed it to `1` on a first
+reading, which would have disabled the retry §10.2 requires, and caught it only
+by re-reading §10.2. Restored, with a comment saying what zero means. Anywhere
+this idiom is copied, the comment goes with it.
+
+Cost: one hang diagnosed by fetching workflow history under a timeout. Faults 1
+and 2 are silent — no test the plan specifies would have caught either as
+anything but a hang or an `AttributeError`.
+
+## The determinism guard is no longer vacuous
+
+The known weakness logged above is closed by this task: `python/workflows/` now
+exists and holds real workflow code, so the guard scans a non-empty set.
+Re-probed rather than assumed — a file containing `import httpx` and
+`datetime.now()` was dropped in, the guard failed naming both lines, and the
+probe was deleted. Nothing about it is committed.

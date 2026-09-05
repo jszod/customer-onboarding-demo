@@ -1,0 +1,138 @@
+"""The extraction agent child workflow. §8.1, T-CHILD-01/02/03.
+
+The stubs here are hand-written, not recorded (§16.0): these tests pin the
+loop's control flow, and a scripted sequence states the case under test in the
+test itself. Fixtures are for `call_llm`'s own behaviour, not for this.
+"""
+import asyncio
+import uuid
+
+from temporalio import activity
+from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import Worker
+
+from python import config
+from python.models.application import ApplicationFields
+from python.models.documents import DocumentManifest, DocumentRef
+from python.models.extraction import (AgentTurn, DocumentRequest, Escalation,
+                                      ExtractionRequest, ExtractionResult,
+                                      ExtractionSubmission,
+                                      FieldGap, LLMRequest, LLMResponse)
+from python.workflows.extraction import ExtractionAgentWorkflow
+
+
+def _manifest() -> DocumentManifest:
+    kinds = {"articles-of-incorporation": "articles_of_incorporation",
+             "business-license": "business_license", "ein-letter": "ein_letter",
+             "w9": "w9", "ownership-declaration": "ownership_declaration"}
+    return DocumentManifest(refs=[
+        DocumentRef(doc_id=d, kind=k, uri=f"acme-corp/1/{d}.pdf",
+                    sha256="0" * 64, page_count=1) for d, k in kinds.items()])
+
+
+def _request() -> ExtractionRequest:
+    return ExtractionRequest(client_key="acme-corp", legal_name="Acme Holdings LLC",
+                             manifest=_manifest(), attempt=1)
+
+
+def _scripted(*responses: LLMResponse):
+    """A stub, not a fixture (§16.0) — hand-written is correct here."""
+    seen: list[LLMRequest] = []
+
+    @activity.defn(name="call_llm")
+    async def stub(req: LLMRequest) -> LLMResponse:
+        seen.append(req)
+        return responses[min(len(seen) - 1, len(responses) - 1)]
+
+    return stub, seen
+
+
+async def _run(stub, req: ExtractionRequest):
+    queue = str(uuid.uuid4())
+    async with await WorkflowEnvironment.start_local(
+            data_converter=config.build_data_converter()) as env:
+        async with Worker(env.client, task_queue=queue,
+                          workflows=[ExtractionAgentWorkflow], activities=[stub]):
+            return await env.client.execute_workflow(
+                "ExtractionAgentWorkflow", req, result_type=ExtractionResult,
+                id=f"extract-{uuid.uuid4()}", task_queue=queue)
+
+
+def _execute(stub, req: ExtractionRequest):
+    """Sync entry point. The manifest wrappers (§16.8) are plain functions, so
+    the loop is owned here and closed rather than leaked."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_run(stub, req))
+    finally:
+        loop.close()
+
+
+def _turn(text: str = "ok") -> AgentTurn:
+    return AgentTurn(role="assistant", content=text)
+
+
+def assert_falls_back_to_w9():
+    """T-CHILD-01. The model asks for the EIN letter, cannot read tax_id, then
+    asks for the W-9 and succeeds. The workflow must carry BOTH doc ids
+    forward on the second call."""
+    stub, seen = _scripted(
+        LLMResponse(action=DocumentRequest(doc_ids=["ein-letter"],
+                                           rationale="tax_id lives here"),
+                    turn=_turn()),
+        LLMResponse(action=DocumentRequest(doc_ids=["w9"],
+                                           rationale="EIN letter illegible"),
+                    turn=_turn()),
+        LLMResponse(action=ExtractionSubmission(
+            application=ApplicationFields(legal_name="Acme Holdings LLC",
+                                          tax_id="88-1234567"), gaps=[]),
+            turn=_turn()),
+    )
+    result = _execute(stub, _request())
+    assert result.escalated is False
+    assert result.application.tax_id == "88-1234567"
+    assert result.iterations == 3
+    assert seen[0].requested_doc_ids == []
+    assert seen[1].requested_doc_ids == ["ein-letter"]
+    assert seen[2].requested_doc_ids == ["ein-letter", "w9"], \
+        "requested docs must accumulate, not be replaced"
+
+
+def assert_escalates_with_provenance():
+    """T-CHILD-02. Escalation is a RETURN VALUE, not an exception (§8.2)."""
+    gap = FieldGap(field_path="beneficial_owners[1].dob",
+                   reason="not stated in any document",
+                   documents_searched=["ownership_declaration", "w9"])
+    stub, _ = _scripted(LLMResponse(action=Escalation(gaps=[gap]), turn=_turn()))
+    result = _execute(stub, _request())
+    assert result.escalated is True
+    assert result.gaps[0].field_path == "beneficial_owners[1].dob"
+    assert "ownership_declaration" in result.gaps[0].documents_searched
+
+
+def assert_cap_escalates():
+    """T-CHILD-03. Hitting MAX_ITERATIONS escalates; it does not raise."""
+    stub, seen = _scripted(LLMResponse(
+        action=DocumentRequest(doc_ids=["w9"], rationale="again"), turn=_turn()))
+    result = _execute(stub, _request())
+    assert result.escalated is True
+    assert result.iterations == config.settings().max_iterations
+    assert len(seen) == config.settings().max_iterations
+
+
+def test_unknown_doc_id_is_a_tool_error_not_an_exception():
+    """§8.1 — validation against the in-state manifest is a pure check; an
+    unknown id returns an error to the model."""
+    stub, seen = _scripted(
+        LLMResponse(action=DocumentRequest(doc_ids=["not-a-document"],
+                                           rationale="guessing"), turn=_turn()),
+        LLMResponse(action=Escalation(gaps=[]), turn=_turn()))
+    result = _execute(stub, _request())
+    assert result.escalated is True
+    assert any("unknown" in t.content.lower() for t in seen[1].turns)
+
+
+def test_child_has_exactly_one_activity():
+    """§8.1 — every tool is inline; only call_llm is an activity."""
+    source = open("python/workflows/extraction.py").read()
+    assert source.count("execute_activity") == 1
