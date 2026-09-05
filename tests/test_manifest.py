@@ -26,9 +26,10 @@ def test_T_ACT_02_call_llm_classifies_errors():
     """401 non-retryable, 429 sets next_retry_delay, 5xx retryable."""
 
 
-@pytest.mark.skip(reason=SKIP)
 def test_T_ACT_03_open_account_is_idempotent():
     """Two calls with the same idempotency key: the second returns duplicate."""
+    from tests.test_activity_core_banking import assert_second_call_is_duplicate
+    assert_second_call_is_duplicate()
 
 
 # --- §16.2 workflow tests (Tasks 14, 15, 16) ---

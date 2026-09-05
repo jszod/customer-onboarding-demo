@@ -311,6 +311,46 @@ addition, not a rewrite.
 
 ---
 
+## R-009 — `open_account` must not block the event loop
+
+**Task 11. `python/activities/core_banking.py`.**
+
+**The plan used a synchronous `httpx.Client` inside an `async def` activity**,
+with a 110-second client timeout. That blocks the worker's event loop for the
+whole call — 10 seconds in the demo's slow-first-call beat, up to 110 in the
+wild — stalling the workflow poller and every other activity on that worker.
+It would have delayed the very retry the demo exists to show. It also made the
+plan's own test unrunnable, since `httpx.ASGITransport` is async-only and
+cannot be handed to a sync client. **Ruling:** `httpx.AsyncClient` with the
+same `timeout=110.0`, which is deliberately far longer than the 5s
+`start_to_close` — the point of §10.1 is that the activity timeout does *not*
+cancel the in-flight request. Pinned by
+`test_the_http_client_outlives_the_activity_timeout`.
+
+This is the third instance of one pattern, and it is worth naming for the
+remaining tasks: **blocking I/O inside `async def`.** Task 7 had it in the
+gateway's control and assign endpoints; Task 11 had it here. Tasks 13–17 should
+be read with it in mind.
+
+**All 4xx are non-retryable except 408 and 429.** The plan special-cased only
+`400`; §10.2 says "core rejects the application (business 4xx)". A 422 from
+request validation would otherwise have retried until the attempt was spent, on
+a verdict that cannot change. 408 and 429 stay retryable — congestion, not a
+verdict. Nothing observable changes today, since the service only emits 400.
+
+**The plan's suggested docstring would have failed the plan's own test.** Its
+Step 1 asserts `"info().attempt" not in source`; its Step 3 docstring named
+that expression while warning against it. Reworded to "a retry counter". This
+is the second occurrence of the same trap — Task 6's docstring broke Task 6's
+`"temporalio"` assertion the same way. **When a test greps source for a
+forbidden string, the prose in that file is subject to the test.**
+
+Verified here: `grep -i attempt python/activities/core_banking.py` returns
+nothing at all, so the key cannot vary per retry by construction rather than by
+convention.
+
+---
+
 ## Closed — `make verify`'s false green between Tasks 1 and 3
 
 Recorded in Task 1: `make verify` printed "VERIFY OK: 22/22 scenarios
