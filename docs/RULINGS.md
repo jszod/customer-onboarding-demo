@@ -688,3 +688,58 @@ failure path. The non-retryable rejection, which is one, completes as
 
 **No promotions from this task.** Nothing here has happened twice, and the
 rule of two means what it says.
+
+---
+
+## R-016 — the plan's "no timer summary" claim is wrong; §12's label is reachable
+
+**Task 17.** Step 3 instructs: *"`workflow.wait_condition(timeout=...)` does not
+accept a `summary`, so the labelled durable timer for §12 comes from the
+explicit `workflow.sleep` in Task 16 plus `set_current_details` in Task 18.
+Record this as a ruling."*
+
+**Checked rather than recorded.** `inspect.signature(workflow.wait_condition)`
+returns `['fn', 'timeout', 'timeout_summary']`. The parameter exists; it is
+named `timeout_summary`, not `summary`, which is presumably how the plan
+concluded it was absent. `workflow.sleep` takes `summary` — the two differ, and
+that is the whole of it.
+
+**So the ruling is the opposite of the one requested.** Both SLA waits now pass
+`timeout_summary`, and §12's example label — *"KYC review SLA — 3 days"* — is
+what the Timeline shows, from the mechanism §9.2 actually uses. No fallback to
+`set_current_details` is needed for this, and Task 18 does not inherit a gap.
+
+**The general point, worth more than the fix.** A ruling that records a
+limitation is a claim about the world, and this one would have been wrong in
+the permanent record — cited later as the reason the demo's timers are unlabelled.
+One `inspect.signature` call settled it. **Check a limitation before logging
+it; a plan asking for a ruling is not evidence that the limitation is real.**
+
+## Known weakness — the suite errors intermittently, twice seen, not reproduced
+
+Recording this rather than fixing it, because it has now happened twice and the
+rule of two says it stops being noise at two.
+
+**Sighting 1 (after Task 13).** `make test` exited non-zero while its own
+summary line read `129 passed, 16 skipped`. Four immediate re-runs were clean.
+The output was piped through `tail -2` and the detail was lost.
+
+**Sighting 2 (this task).** `163 passed, 4 skipped, 1 error` — one test short
+of the 163 that pass on a clean run, with the failure counted as an **error**
+rather than a failure, which in pytest means fixture setup or teardown rather
+than the test body. Four immediate re-runs were clean, all 163/4.
+
+**Hypothesis, untested.** `env` and `skip_env` are function-scoped, so the suite
+now boots roughly a dozen Temporal servers per run, each claiming ports. A port
+or startup race in that churn would present exactly this way: a fixture error,
+unreproducible, unrelated to the test that happens to catch it.
+
+**The fix, when someone takes it.** `.claude/rules/testing.md` already says
+`start_local` "is shareable via a pytest fixture" — making `env` session-scoped
+(with `loop_scope="session"`) would cut the boots to one and remove most of the
+race surface. `skip_env` must stay function-scoped: §16.3 says time-skipping
+environments cannot be shared. Not done here because the suite is green, the
+fault has never been reproduced on demand, and changing fixture scope at the end
+of a task trades a rare unexplained error for a fresh class of cross-test
+interference. **Task 20 touches the test infrastructure anyway and is the right
+place.** If a third sighting lands first, do it then regardless.

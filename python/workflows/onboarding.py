@@ -104,7 +104,7 @@ class OnboardingWorkflow:
             self._stage = "awaiting_review"
             self._pending_since = workflow.now()
             self._review = None
-            await self._await_review()
+            await self._await_review(req)
             review = self._review
             assert review is not None
 
@@ -178,7 +178,7 @@ class OnboardingWorkflow:
 
         self._stage = "awaiting_client_id"
         self._pending_since = workflow.now()
-        await workflow.wait_condition(lambda: self._client_id_assignment is not None)
+        await self._await_client_id(req)
         assignment = self._client_id_assignment
         assert assignment is not None
 
@@ -215,9 +215,59 @@ class OnboardingWorkflow:
         return OnboardingResult(status=status, client_id=client_id,
                                 attempts=self._attempt, detail=detail)
 
-    async def _await_review(self) -> None:
-        """Replaced by Task 17 with the tiered SLA. Never auto-approves."""
+    async def _await_review(self, req: ApplicationRequest) -> None:
+        """§9.2. Tiered reminders, and the workflow NEVER auto-approves.
+
+        A workflow that approved a KYC application because a timer fired would
+        be a compliance incident. Only a human closes this gate; the timers
+        only nag. T-TIME-02 pins this by advancing a year."""
+        for delay, tier, recipients in (
+                (SETTINGS.sla_remind, "reminder",
+                 ["onboarding_specialist"]),
+                (SETTINGS.sla_escalate - SETTINGS.sla_remind, "escalation",
+                 ["onboarding_specialist", "supervisor"])):
+            try:
+                # §12 wants the durable timer labelled on the Timeline. The
+                # parameter is `timeout_summary`, not `summary`.
+                await workflow.wait_condition(
+                    lambda: self._review is not None, timeout=delay,
+                    timeout_summary=f"KYC review SLA — {tier} at {delay}")
+                return
+            except TimeoutError:
+                await workflow.execute_activity(
+                    "notify",
+                    NotifyRequest(
+                        client_key=req.client_key, client_id=None,
+                        outcome="manual_intervention", recipients=recipients,
+                        detail=f"KYC review {tier}: attempt {self._attempt} has "
+                               f"been awaiting review since {self._pending_since}"),
+                    result_type=NotifyResult,
+                    start_to_close_timeout=timedelta(seconds=30),
+                    summary=f"KYC review {tier}")
+        # Both tiers have fired. Keep waiting -- indefinitely, by design.
         await workflow.wait_condition(lambda: self._review is not None)
+
+    async def _await_client_id(self, req: ApplicationRequest) -> None:
+        """§9.3. Same never-give-up basis: chase, never abandon."""
+        while True:
+            try:
+                await workflow.wait_condition(
+                    lambda: self._client_id_assignment is not None,
+                    timeout=SETTINGS.client_id_sla,
+                    timeout_summary=f"Client ID SLA — {SETTINGS.client_id_sla}")
+                return
+            except TimeoutError:
+                await workflow.execute_activity(
+                    "notify",
+                    NotifyRequest(
+                        client_key=req.client_key, client_id=None,
+                        outcome="manual_intervention",
+                        recipients=["onboarding_specialist"],
+                        detail=f"still awaiting the client ID from core banking "
+                               f"(request {self._core_request_id})"),
+                    result_type=NotifyResult,
+                    start_to_close_timeout=timedelta(seconds=30),
+                    summary="Chase the core banking client ID")
 
     # --------------------------------------------------------- wire surface
 

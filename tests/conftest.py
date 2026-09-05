@@ -106,6 +106,15 @@ class StubExtractionChild:
 
 
 @pytest_asyncio.fixture
+async def skip_env():
+    """Time-skipping environments CANNOT be shared between tests (§16.3), so
+    this is function-scoped like `env` and never reused."""
+    async with await WorkflowEnvironment.start_time_skipping(
+            data_converter=config.build_data_converter()) as e:
+        yield e
+
+
+@pytest_asyncio.fixture
 async def env():
     async with await WorkflowEnvironment.start_local(
             data_converter=config.build_data_converter()) as e:

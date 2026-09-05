@@ -122,20 +122,32 @@ async def test_T_WF_09_child_workflow_error_counts_as_a_spent_attempt(env):
 
 # --- §16.3 time-skipping tests (Task 17) ---
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_TIME_01_remind_then_escalate_fire_in_order():
-    """Remind at SLA_REMIND, escalate at SLA_ESCALATE, still waiting after both."""
+async def test_T_TIME_01_remind_then_escalate_fire_in_order(skip_env, monkeypatch):
+    """Remind at SLA_REMIND, escalate at SLA_ESCALATE, still waiting after both.
+
+    Delegates to tests/test_sla_timers.py::test_T_TIME_01_remind_then_escalate_fire_in_order.
+    """
+    from tests.test_sla_timers import test_T_TIME_01_remind_then_escalate_fire_in_order
+    await test_T_TIME_01_remind_then_escalate_fire_in_order(skip_env, monkeypatch)
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_TIME_02_never_auto_approves():
+async def test_T_TIME_02_never_auto_approves(skip_env, monkeypatch):
     """Far past both SLAs, stage is still awaiting_review. §9.2's rule is
-    worthless without this test."""
+    worthless without this test.
+
+    Delegates to tests/test_sla_timers.py::test_T_TIME_02_never_auto_approves.
+    """
+    from tests.test_sla_timers import test_T_TIME_02_never_auto_approves
+    await test_T_TIME_02_never_auto_approves(skip_env, monkeypatch)
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_TIME_03_client_id_sla_does_not_abandon_the_workflow():
-    """CLIENT_ID_SLA fires, reminds, and keeps waiting."""
+async def test_T_TIME_03_client_id_sla_does_not_abandon_the_workflow(skip_env, monkeypatch):
+    """CLIENT_ID_SLA fires, reminds, and keeps waiting.
+
+    Delegates to tests/test_sla_timers.py::test_T_TIME_03_client_id_sla_does_not_abandon_the_workflow.
+    """
+    from tests.test_sla_timers import test_T_TIME_03_client_id_sla_does_not_abandon_the_workflow
+    await test_T_TIME_03_client_id_sla_does_not_abandon_the_workflow(skip_env, monkeypatch)
 
 
 # --- §16.4 child workflow tests (Task 13) ---

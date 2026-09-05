@@ -31,6 +31,15 @@ with workflow.unsafe.imports_passed_through():
 The sandbox is right to refuse: a workflow that re-read its config mid-run
 would replay differently after an env change.
 
+**What this does and does not buy you.** The value is fixed for the run, not
+for the process: the sandbox re-imports workflow modules, so `SETTINGS` tracks
+the environment as it was when the run started. Task 17's SLA tests rely on
+exactly that — `monkeypatch.setenv("SLA_REMIND", "1h")` reaches the workflow.
+The consequence is that hoisting removes the *sandbox violation*, not the
+replay hazard: replaying an old history under a changed env still reads the new
+value. Configuration that must survive replay belongs in the workflow's
+argument, where it is written into history.
+
 **Know the symptom, because it is not an error.** A restricted access fails the
 workflow *task*, and workflow tasks retry forever. The test does not fail — it
 hangs.

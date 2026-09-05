@@ -6,22 +6,21 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–16 have landed. Task 17 is next.** Skeleton and config, models
+**Plan Tasks 1–17 have landed. Task 18 is next.** Skeleton and config, models
 and `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
 documents, core banking, the gateway, the console, all four activities, the
 extraction child, and the parent's loop and happy path.
 
-Suite: **156 passed, 7 skipped.** The 7 skips are the manifest scenarios not
-yet implemented — that count is the progress bar, and `make verify` is
-correctly red until it reaches zero. All nine T-WF scenarios, T-ACT-01/02/03
-and T-CHILD-01/02/03 are live; the headline timeout beat is pinned by
-T-WF-07.
+Suite: **163 passed, 4 skipped.** The 4 remaining skips are the T-REPLAY
+scenarios, which Task 20 owns — every other manifest scenario is live. That
+count is the progress bar, and `make verify` is correctly red until it reaches
+zero.
 
-Task 17 replaces `_await_review`, which Task 14 left as a one-line method for
-exactly that reason, with the tiered SLA. **Read the never-auto-approve rule
-below before writing it** — `T-TIME-02` is the test that enforces it.
+Task 18 is the progress tracker, and it also carries R-014's deferred half:
+making the console's extracted-fields table editable. See the ruling for the
+exact steps.
 
-**Tasks 17–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
+**Tasks 18–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
 SDK downloads its own server binaries from `temporal.download` at runtime — the
 only download host compiled into the Rust bridge — so that host must be
 reachable, or the work must run somewhere it already is. The Temporal CLI is a
