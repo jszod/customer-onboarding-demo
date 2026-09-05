@@ -15,6 +15,10 @@ demo: demo-reset up
 	@echo "  ready — click Submit on the console"
 
 temporal:
+	@command -v temporal >/dev/null 2>&1 || \
+		{ echo "Temporal CLI not on PATH — install it with: brew install temporal"; \
+		  echo "(see README Setup; make demo cannot start a dev server without it)"; \
+		  exit 1; }
 	@pgrep -f "[t]emporal server start-dev" >/dev/null 2>&1 || \
 		(nohup temporal server start-dev --ui-port 8233 > /tmp/onboarding-temporal.log 2>&1 & \
 		 sleep 3 && echo "temporal dev server started (UI :8233)")
