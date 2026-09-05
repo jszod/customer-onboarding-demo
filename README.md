@@ -20,11 +20,11 @@ Three things, in this order. Only the first is specific to this demo.
 the CLI has to be on your `PATH` before anything else works. It ships as a
 single binary that bundles both the dev server and the Web UI.
 
-    # macOS / Linux — installs to ~/.temporalio/bin and offers to add it to PATH
-    curl -sSf https://temporal.download/cli.sh | sh
-
-    # or, with Homebrew
     brew install temporal
+
+Upgrading an existing install is `brew upgrade temporal`. On a machine without
+Homebrew, see the [Temporal CLI install
+docs](https://docs.temporal.io/cli/setup-cli).
 
 Then confirm the install, and the version floor with it:
 
