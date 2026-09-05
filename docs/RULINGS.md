@@ -111,6 +111,51 @@ genuine serialization problem anywhere else still surfaces.
 
 ---
 
+## R-004 — the sample documents' gap test, and reproducible PDFs
+
+**Task 5. `tools/make_documents.py`, `tests/test_sample_documents.py`.**
+
+Three decisions worth keeping, all verified in the parent session rather than
+taken on the implementer's word.
+
+**The plan's gap test passed by accident.** It sliced
+`body.split("Marcus Vela")[1][:200]` and asserted `"Date of Birth"` was absent.
+Under the plan's own document ordering the *control person's*
+`Date of Birth: 1978-06-02` begins around character 191 of that slice — it
+passed only because the token ran past the 200-character cut. Any rewording
+would have flipped it, and the failure would have looked like a content bug
+rather than a test bug. **Ruling:** bound Marcus's block by the next section
+header (`"Control Person"`) instead of a character count, and additionally
+assert no bare date matching `\d{4}-\d{2}-\d{2}` or `\d{1,2}/\d{1,2}/\d{4}`
+appears in it — an unlabelled date fills the gap just as effectively as a
+labelled one. Strictly stronger than the plan's version.
+
+**`invariant=1` on `SimpleDocTemplate`.** These PDFs are generated *and
+committed*, and reportlab stamps a creation timestamp and a random document ID
+by default, so every regeneration would produce a spurious binary diff and
+`make documents` would dirty the tree on any machine. Verified in the parent
+session: two consecutive runs produce byte-identical files by sha256. Task 13's
+fixtures are therefore pinned to reproducible inputs.
+
+**Three tests added beyond the plan**, all guarding §8.4 / §5.2 properties the
+plan asserted only in prose: the five file stems are exactly the five
+`DocumentKind` values (the only place file names and Task 2's `Literal` are
+checked against each other); Marcus is named in no other document, so an agent
+that reads *everything* still cannot fill the gap and the escalation is
+genuine; and every required §5.1 field has a source token somewhere in the set,
+so "complete except one dob" is verified rather than assumed.
+
+Independently confirmed here: Marcus appears in `ownership-declaration` only,
+with no date in his block; the tax ID appears in both `ein-letter` and `w9`,
+which is what T-CHILD-01's fallback needs.
+
+Document prose was extended past the plan's line lists (good-standing
+certification, W-9 perjury clause, IRS notice text) so the agent reads
+document-shaped text rather than a field list. Every plan-specified token is
+preserved verbatim, so Task 13's fixtures can rely on them.
+
+---
+
 ## Closed — `make verify`'s false green between Tasks 1 and 3
 
 Recorded in Task 1: `make verify` printed "VERIFY OK: 22/22 scenarios
