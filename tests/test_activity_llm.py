@@ -440,3 +440,81 @@ def test_both_implementations_register_under_one_activity_name():
     from temporalio import activity
     for fn in (llm.live_call_llm, llm.fixture_call_llm):
         assert activity._Definition.must_from_callable(fn).name == "call_llm"
+
+
+# --------------------------------------------------------------------------
+# Defects found reviewing the activities — see docs/RULINGS.md R-018
+# --------------------------------------------------------------------------
+
+def test_absent_credentials_are_classified_not_retried():
+    """With no key resolvable the SDK constructs fine and then raises a BARE
+    TypeError from `messages.create` — not an `anthropic` error, so it misses
+    every clause in the classification chain, escapes, and retries forever on
+    the default policy. A missing env var must not present as a hung workflow."""
+    boom = TypeError(
+        "Could not resolve authentication method. Expected one of api_key, "
+        "auth_token, or credentials to be set.")
+    err = _run_expecting(boom)
+    assert err.non_retryable is True, "no retry can conjure a credential"
+    assert err.type == "AuthenticationError"
+    assert "FIXTURE_MODE" in str(err), "say how to run without a key (§16.7)"
+
+
+def test_an_unrelated_type_error_is_not_swallowed():
+    """The clause is narrow on purpose: a genuine bug in the call must still
+    surface as itself rather than being relabelled a credentials problem."""
+    with m.patch.object(llm, "_llm_down_flag",
+                        lambda: Path("/nonexistent/.llm_down")):
+        with m.patch.object(llm, "_create_message",
+                            _raise(TypeError("unexpected keyword 'modle'"))):
+            with pytest.raises(TypeError):
+                _run(llm.live_call_llm, _request())
+
+
+def test_the_model_call_does_not_run_on_the_event_loop():
+    """The Anthropic client is synchronous and can hold a socket for
+    `_CLIENT_TIMEOUT_SECONDS`. On the event loop it stalls every other
+    activity on the worker, its workflow tasks, and its heartbeats (R-009)."""
+    import threading
+    ran_on = {}
+
+    def _record(**_k):
+        ran_on["thread"] = threading.current_thread()
+        raise anthropic.APIConnectionError(request=httpx2.Request("POST", "http://x"))
+
+    with m.patch.object(llm, "_llm_down_flag",
+                        lambda: Path("/nonexistent/.llm_down")):
+        with m.patch.object(llm, "_create_message", _record):
+            with pytest.raises(ApplicationError):
+                _run(llm.live_call_llm, _request())
+
+    assert ran_on["thread"] is not threading.main_thread(), \
+        "the blocking client must be handed to a worker thread"
+
+
+def test_an_empty_fixture_file_is_non_retryable(tmp_path, monkeypatch):
+    """`min(len(turns), len(sequence) - 1)` is -1 on an empty file, which
+    indexes the empty list and raises IndexError — unclassified, so it retries
+    forever rather than saying what is wrong."""
+    monkeypatch.setenv("FIXTURE_DIR", str(tmp_path))
+    (tmp_path / "acme-corp.json").write_text("[]")
+    with pytest.raises(ApplicationError) as ei:
+        _run(llm.fixture_call_llm, _request())
+    assert ei.value.non_retryable is True
+    assert ei.value.type == "FixturesMissing"
+
+
+def test_running_past_the_recording_says_so(tmp_path, monkeypatch):
+    """Clamping to the last entry replays one response forever, which presents
+    as the agent looping to its iteration cap for no visible reason."""
+    monkeypatch.setenv("FIXTURE_DIR", str(tmp_path))
+    (tmp_path / "acme-corp.json").write_text(json.dumps([
+        {"action": {"kind": "request_documents", "doc_ids": ["ein-letter"],
+                    "rationale": "first"},
+         "turn": {"role": "assistant", "content": "first"}, "usage": {}}]))
+    req = _request(turns=[AgentTurn(role="assistant", content="first"),
+                          AgentTurn(role="assistant", content="second")])
+    with pytest.raises(ApplicationError) as ei:
+        _run(llm.fixture_call_llm, req)
+    assert ei.value.non_retryable is True
+    assert ei.value.type == "FixturesExhausted"

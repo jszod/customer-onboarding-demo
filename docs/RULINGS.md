@@ -471,3 +471,107 @@ Not fixed, because the honest fix — asserting the directory exists — would f
 the suite for the ten tasks before Task 13 creates it. The file-structure table
 locks the path, and Task 20's replay tests are the real determinism gate. If
 `python/workflows/` ever moves, this guard must move with it.
+
+## R-018 — eight defects found reviewing the merged activity and tooling code
+
+Numbered R-018 rather than R-017 on purpose: R-017 is the parallel review of
+the Task 13–17 workflow branch, which is in flight on its own branch. Two
+reviews ran at once and the numbers were reserved so the entries could not
+collide; if that branch lands second, the log reads out of order and that is
+the lesser problem.
+
+This one covers what was already on `main` — the activities, the fake core
+banking service, and the Makefile.
+
+**1. `make verify` — the definition of done — passed a failing suite.** The
+gate pipes pytest into `tee`, and the shell hands back **tee's** exit status,
+not pytest's. Everything then rested on a grep for "skipped". While skips
+remain that is masked, because the skip check fails first; the moment the last
+skip is implemented, a suite with real failures prints "VERIFY OK: 22/22
+scenarios implemented and passing" and exits 0. Reproduced end to end: a
+deliberately failing test, all skips removed, old gate — exit 0 and a green
+message. The status now travels through a file, checked before the skip check
+(`pipefail` is not POSIX and this Makefile does not choose its shell).
+
+**The earlier ruling on this file closed the wrong half.** *"Closed — `make
+verify`'s false green between Tasks 1 and 3"* looked at a gate that printed OK
+when nothing was skipped, decided the message "becomes true when the manifest
+lands", and closed it when the skip count started working. The skip half was
+real. The exit-status half was never looked at, and it is the half that
+survives to the end of the build — it only becomes reachable when the last
+skip goes. **A gate that has only ever been watched failing one of its two
+checks has not been tested; force the other one.**
+
+**2 and 3. `gaps.py` crashed on the escalation input it exists to describe.**
+`control_person` is optional and `REQUIRED_FIELD_PATHS` walks *through* it, so
+`compute_gaps(ApplicationFields())` took an `AttributeError` on None —
+`_get`'s loop assumed every parent exists. `apply_edits` had the same hole,
+plus two more: a composite path (`registered_address`) handed a line of text
+raised a raw `ValidationError`, and an index past the end of a list raised
+`IndexError`. The console renders a free-text box per gap and posts whatever
+is typed, so an analyst reached all three from the Approve button.
+
+`_get` now stops at an absent parent, `missing_required` drops a container
+whose leaves it is already reporting (a `control_person` row is unfillable; a
+`control_person.dob` row is not), and `apply_edits` builds an absent optional
+parent so the leaf edit lands, refuses a missing index by name, and converts a
+schema failure into a readable `ValueError`. **This contradicts R-011's claim
+that `apply_edits` handles any path — it handled every path the happy-path
+fixture produces.**
+
+**Left alone deliberately:** `registered_address` and `business_address` are
+listed whole in §5.2 and `FieldEdit.value` is a `str`, so no typed text can
+build an `Address`. An application missing an entire address is therefore
+still unapprovable — it now refuses readably instead of raising. Making it
+fillable means listing the address leaves in `REQUIRED_FIELD_PATHS`, which is
+a spec change, not a bug fix.
+
+**4. One corrupt file stopped every workflow.** `notify` did an unguarded
+`json.loads` on `notifications.json` and a non-atomic `write_text`. A worker
+killed mid-write leaves a truncated file; every subsequent `notify` then
+raises an unclassified error and retries on the default unlimited policy. Every
+terminal status goes through `notify`, so **no workflow could reach a terminal
+status** — one half-written file presenting as the whole system hanging, and a
+direct breach of "every failure path ends in a business status". Writes now go
+through a temp file and `os.replace`; an unreadable log is renamed aside (kept
+as evidence) and a new one started.
+
+**5. `call_llm` blocked the event loop.** The synchronous Anthropic client and
+`PdfReader` both ran directly inside an `async def`, holding the loop for up to
+`_CLIENT_TIMEOUT_SECONDS` (110s) and stalling every other activity on the
+worker, its workflow tasks, and its heartbeats. Both legs now go through
+`asyncio.to_thread`. **This is the same defect as R-009, and the fourth
+instance in this build.** It has now appeared often enough that finding it
+should be a checklist item on every `async def`, not a discovery.
+
+**6. A missing API key retried forever.** With no credential resolvable the
+SDK constructs happily with `api_key=None` and raises a bare `TypeError` from
+`messages.create` — not an `anthropic` error, so it misses every clause in the
+classification chain, escapes, and retries unbounded. A missing environment
+variable presented as a hung workflow. Now classified non-retryable, with the
+`FIXTURE_MODE=1` escape hatch named in the message. The clause is deliberately
+narrow (it re-raises a `TypeError` that is not about authentication) so a
+genuine bug in the call is not relabelled a credentials problem.
+
+**7. The fixture selector had an off-by-one and a silent clamp.**
+`min(len(turns), len(sequence) - 1)` is `-1` for an empty file, which indexes
+the empty list and raises `IndexError`; and once the agent runs past the end of
+the recording it replayed the last response forever, which presents as the
+agent looping to its iteration cap for no visible reason. Both are now
+non-retryable errors that say what to do.
+
+**8. Two smaller ones.** `make demo-reset` did not clear `.llm_down`, so a
+toggled model outage survived into the next demo — the flag lives beside
+`.store`, not inside it, because the path is DOCUMENT_STORE's *parent*, which
+defaults to the repo root. It was not in `.gitignore` either. And core
+banking's `assign` persisted the client ID and then posted the callback
+unguarded, so a gateway hiccup returned a bare 500 with the ID already minted
+and the workflow parked in `awaiting_client_id` with no idea one existed. It
+now returns a 502 naming the ID and saying to assign again — which is safe,
+because `assign_client_id` was already idempotent.
+
+**On the tests.** Sixteen added; fourteen were confirmed to fail on the
+pre-fix code. The two that did not are guards rather than pins and are labelled
+as such: one holds the new `TypeError` clause narrow, and one pins the
+atomic-write path, which cannot observe truncation without an actual crash
+mid-write. Suite: 124 passed → 140 passed, 19 skipped unchanged.

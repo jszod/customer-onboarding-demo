@@ -77,8 +77,22 @@ def build_app() -> FastAPI:
         payload = {"client_key": client_key, "client_id": row["client_id"],
                    "core_ref": row["request_id"],
                    "assigned_at": _iso(row["assigned_at"])}
-        httpx.post(f"{app.state.gateway_url}/callbacks/client-id",
-                   json=payload, timeout=10.0)
+        try:
+            response = httpx.post(f"{app.state.gateway_url}/callbacks/client-id",
+                                  json=payload, timeout=10.0)
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            # The ID is already minted and persisted -- that happened above and
+            # cannot be taken back. Saying so is the whole point: an unguarded
+            # post here returns a bare 500 while the workflow sits in
+            # `awaiting_client_id` with no idea an ID exists for it. Pressing
+            # assign again is safe and is the recovery: `assign_client_id`
+            # returns the original row rather than minting a second ID.
+            raise HTTPException(
+                status_code=502,
+                detail=f"client ID {row['client_id']} is assigned, but the "
+                       f"onboarding platform did not accept the callback "
+                       f"({e}). Assign again to redeliver it.") from e
         return payload
 
     @app.get("/ledger")
