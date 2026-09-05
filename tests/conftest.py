@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 import pytest_asyncio
@@ -56,6 +57,11 @@ class Stubs:
         self.child_raises = False
         self.open_account_acks: list[OpenAccountAck] = []
         self.notifications: list[dict] = []
+        # Seconds `notify` spends before returning. Lets a test make the
+        # activity's own duration observable, which is the only thing that
+        # separates a deadline measured from an event from one measured from
+        # the previous step.
+        self.notify_delay = 0.0
 
     def activities(self):
         """Every stub annotates its argument. Without the annotation the
@@ -80,6 +86,8 @@ class Stubs:
 
         @activity.defn(name="notify")
         async def notify_(req: NotifyRequest) -> NotifyResult:
+            if outer.notify_delay:
+                await asyncio.sleep(outer.notify_delay)
             outer.notifications.append(req.model_dump(mode="json"))
             return NotifyResult(delivered_to=list(req.recipients))
 

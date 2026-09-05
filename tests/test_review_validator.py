@@ -45,7 +45,7 @@ def _approve(**over) -> dict:
             "field_edits": [], "attested": True, **over}
 
 
-async def test_T_WF_04_approve_with_empty_required_field_is_rejected(env):
+async def assert_approve_with_empty_required_field_is_rejected(env):
     """The rule that forces the analyst to fill the escalated dob (§9.1 r2)."""
     _, queue, worker = await _at_review(env)
     async with worker:
@@ -54,7 +54,7 @@ async def test_T_WF_04_approve_with_empty_required_field_is_rejected(env):
     assert "beneficial_owners[1].dob" in str(ei.value.cause)
 
 
-async def test_T_WF_05_approve_without_attestation_is_rejected(env):
+async def assert_approve_without_attestation_is_rejected(env):
     """§9.1 r3."""
     _, queue, worker = await _at_review(env)
     async with worker:
@@ -64,7 +64,7 @@ async def test_T_WF_05_approve_without_attestation_is_rejected(env):
     assert "attest" in str(ei.value.cause).lower()
 
 
-async def test_T_WF_06_ownership_over_100_is_rejected(env):
+async def assert_ownership_over_100_is_rejected(env):
     """§9.1 r5 — <=, not ==."""
     _, queue, worker = await _at_review(env)
     async with worker:

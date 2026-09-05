@@ -120,6 +120,54 @@ def assert_cap_escalates():
     assert len(seen) == config.settings().max_iterations
 
 
+def test_escalation_carries_the_partial_application_through():
+    """§8.4's beat lands on the review console, so the analyst has to see what
+    the agent DID read. Returning an empty application here would blank every
+    extracted field and leave nothing for their gap edits to address --
+    `beneficial_owners[1].dob` needs owner 1 to exist."""
+    from datetime import date
+
+    from python.models.application import BeneficialOwner
+
+    partial = ApplicationFields(
+        legal_name="Acme Holdings LLC", tax_id="88-1234567",
+        beneficial_owners=[BeneficialOwner(full_name="Dana Reyes",
+                                           dob=date(1979, 3, 2)),
+                           BeneficialOwner(full_name="Sam Okafor")])
+    gap = FieldGap(field_path="beneficial_owners[1].dob",
+                   reason="not stated in any document",
+                   documents_searched=["ownership_declaration"])
+    stub, _ = _scripted(LLMResponse(
+        action=Escalation(application=partial, gaps=[gap]), turn=_turn()))
+    result = _execute(stub, _request())
+
+    assert result.escalated is True
+    assert result.application.legal_name == "Acme Holdings LLC"
+    assert result.application.tax_id == "88-1234567"
+    assert len(result.application.beneficial_owners) == 2, \
+        "the gap names owner 1 -- an empty application makes that edit impossible"
+    assert result.application.beneficial_owners[1].full_name == "Sam Okafor"
+
+
+def test_escalation_without_an_application_is_still_a_clean_result():
+    """The field is optional, so a response that omits it must not crash."""
+    stub, _ = _scripted(LLMResponse(action=Escalation(gaps=[]), turn=_turn()))
+    result = _execute(stub, _request())
+    assert result.escalated is True
+    assert result.application == ApplicationFields()
+
+
+def test_the_iteration_cap_says_why_it_escalated():
+    """The console drives off `gaps`. Escalating with an empty list presents a
+    blank form with nothing flagged and no explanation."""
+    stub, _ = _scripted(LLMResponse(
+        action=DocumentRequest(doc_ids=["w9"], rationale="again"), turn=_turn()))
+    result = _execute(stub, _request())
+    assert result.escalated is True
+    assert result.gaps, "the cap must explain itself"
+    assert "cap" in result.gaps[0].reason
+
+
 def test_unknown_doc_id_is_a_tool_error_not_an_exception():
     """§8.1 — validation against the in-state manifest is a pure check; an
     unknown id returns an error to the model."""

@@ -743,3 +743,87 @@ fault has never been reproduced on demand, and changing fixture scope at the end
 of a task trades a rare unexplained error for a fresh class of cross-test
 interference. **Task 20 touches the test infrastructure anyway and is the right
 place.** If a third sighting lands first, do it then regardless.
+
+**Update (R-017).** The duplicate-collection fix halves the boots on its own —
+twelve scenarios were each starting a second `WorkflowEnvironment` — so the
+race surface is already smaller than when this was written. That is a
+reduction, not a fix: the hypothesis is untested either way, and the
+session-scoped `env` above is still the change to make.
+
+## R-017 — six defects found reviewing Task 13–17 before merge
+
+A code review of the workflow branch, run against the spec rather than the
+plan. All six were live on the branch and none were caught by the 163-test
+suite, which is the part worth noticing: every one of them is a *behaviour the
+tests asserted loosely enough to miss*.
+
+**1. `escalate` threw away everything the agent had extracted.** The child
+returned `ApplicationFields()` on the escalation branch. `prompts.py` steers
+the model to escalate on exactly §8.4's missing `dob`, so the demo's headline
+beat put the analyst in front of a blank application — and their
+`beneficial_owners[1].dob` edit then had no owner 1 to address. No
+`field_edits` could recover it, because `apply_edits` cannot append list
+members. `Escalation` now carries an optional `application`, the tool schema
+and system prompt ask for it on every escalation, and the workflow passes it
+through. **The gap between "escalation is a return value, not an exception"
+(which the rules say, and which was correctly implemented) and "escalation
+carries the work done so far" is where this hid.**
+
+**2. The client-ID chase was recorded once and then silently dropped.**
+`notify` keys its records on `(client_key, outcome, recipients, detail)` —
+R-005 chose that key deliberately — and the chase's `detail` was
+byte-identical on every iteration. Every chase after the first collided with
+the first and was discarded, so an unbounded wait produced exactly one
+notification. §9.3 also says the timer reminds *and* escalates, and this only
+ever reached the onboarding specialist. The detail now carries a chase counter
+and the second chase onward reaches the supervisor. **T-TIME-03 passed
+throughout: it asserted that a chase exists, not that chases keep arriving.**
+
+**3. The exhausted-attempts path described a review that never happened.** The
+detail hard-coded `"rejected N times; last note: ..."`. Three
+`ChildWorkflowError`s exhaust the loop without a single human decision, so
+that string was simply false — and it dropped `self._last_error`, the only
+record of the real cause, from both `OnboardingResult.detail` and the
+supervisor's notification. A rejection now records its note into
+`_last_error` too, and the exhausted path reports whatever actually happened
+last.
+
+**4. A second decision could replace one the workflow had already
+acknowledged.** `submit_review`'s validator gated on stage only and the
+handler assigned unconditionally. Two updates in one activation are both
+*validated* before either handler runs, so both acked `accepted=True` and the
+last writer won — an approval silently replaced by a reject. The guard has to
+be in the handler, before any `await`, for the check and the assignment to be
+one atomic step; the validator keeps a matching check so the ordinary
+sequential case is refused before it reaches history. **A validator cannot
+enforce a property that depends on other updates in the same activation.**
+
+**5. Escalation was measured from the reminder, not from the gate.** The
+second tier waited `sla_escalate - sla_remind`, started *after* the reminder's
+`notify` returned, so escalation always landed late by that activity's
+duration, and the timeout went zero or negative when `SLA_ESCALATE <=
+SLA_REMIND`. Both tiers are now offsets from `_pending_since`. The smallest of
+the six in practice — the drift is milliseconds at realistic SLAs — but the
+negative-timeout case worked only by accident.
+
+**6. Twelve scenarios ran twice.** The `T_WF_*`/`T_TIME_*` manifest wrappers
+delegated to functions named `test_...` in the topic modules, which pytest
+collects on their own as well, so each scenario booted a second
+`WorkflowEnvironment` for no added coverage. The T-CHILD and T-ACT wrappers
+already avoided this by naming their helpers `assert_...`; the workflow
+scenarios now do the same. 163 tests → 151, runtime 48s → 30s, and the
+manifest IDs are untouched.
+
+**On the tests.** Six new regression tests, each confirmed to fail on the
+pre-fix code and pass after — the check that separates a regression test from
+a restatement. Three further tests were written, passed against the unfixed
+code, and were kept as characterization rather than deleted or dressed up as
+pins: an escalation with no application still returning cleanly, a
+misconfigured `SLA_ESCALATE <= SLA_REMIND` still firing both tiers, and a late
+reject after a completed approval (which the *stage* guard already refused —
+the same-activation race is the case the new handler guard actually closes).
+**A test that passes before the fix pins nothing; say so rather than counting
+it.** Defect 5 needed a deliberately slow `notify` before its drift was
+observable at all, and is asserted against the timer duration recorded in
+history rather than against wall-clock arrival, so it does not depend on
+scheduling luck.
