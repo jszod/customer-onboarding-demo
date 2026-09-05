@@ -6,7 +6,9 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Design is complete; no implementation code exists yet.**
+**Design and plan are complete. Implementation is underway: plan Task 1 has
+landed (skeleton, config, Makefile). Tasks 2 and 3 are next and gate
+everything else.**
 
 | Document | What it is |
 |----------|------------|
@@ -37,8 +39,6 @@ they cover. The ones that bind everywhere:
 
 ## Commands
 
-Nothing below exists until plan Task 1 runs.
-
     make deps          # uv sync
     make demo          # reset state, start everything, print URLs
     make up / down / status / logs
@@ -56,6 +56,20 @@ Nothing below exists until plan Task 1 runs.
 The parent's workflow ID is derived from the client key, not a UUID — Temporal
 then forbids two open onboardings for one client, which is a real compliance
 property rather than tidiness.
+
+## The determinism rule
+
+No I/O, no clocks, no randomness in `python/workflows/`. No `requests`,
+`httpx`, `datetime.now()`, `time.time()`, or `random`. Use `workflow.now()`
+and `workflow.uuid4()`. Everything non-deterministic goes in an activity.
+`tests/test_determinism_guard.py` (§16.6) enforces this once Task 3 lands.
+
+Document content never enters workflow history — workflows carry `DocumentRef`s
+and doc ids; activities resolve them to text internally (§8.1, §8.2).
+
+The data converter is built in exactly one place, `config.build_data_converter()`
+(§17). Worker, gateway, core-banking callback and tests all use it; a mismatch
+produces deserialization errors that look like corruption rather than config.
 
 ## Layout
 
