@@ -5184,7 +5184,8 @@ random() call is introduced, then reverted."
 ### Task 21: Final verification and the README — TAIL, sequential
 
 **Files:**
-- Create: `README.md`
+- Modify: `README.md` — a Setup section already exists; grow the README around
+  it rather than overwriting it
 - Modify: `docs/DESIGN-DIAGRAMS.md` — nothing, but re-read it against the built system
 - Test: the full suite via `make verify`
 
@@ -5215,7 +5216,7 @@ Open `http://localhost:8233`, find `onboarding-acme-corp`, and check: `static_su
 
 - [ ] **Step 4: Write the README**
 
-Cover, in this order: what the demo shows (the three stories from §1), the seven-step flow, quickstart (`make deps`, `export ANTHROPIC_API_KEY=…`, `make demo`), the demo script from Step 2 written as a numbered walkthrough with what to say at each beat, the three failure beats and how to trigger each, `FIXTURE_MODE=1` as the no-key path, `make test` / `make verify`, a pointer to `CONTRACT.md` for adding another SDK, and pointers to `TALK_TRACK.md` and `docs/DESIGN-DIAGRAMS.md` for the design-only conversation.
+Cover, in this order: what the demo shows (the three stories from §1), the seven-step flow, the existing Setup section (Temporal CLI — `make demo` shells out to `temporal server start-dev`, and §12's UI v2.34.6 floor is checked with `temporal --version` — then uv, then the key), quickstart (`make deps`, `export ANTHROPIC_API_KEY=…`, `make demo`), the demo script from Step 2 written as a numbered walkthrough with what to say at each beat, the three failure beats and how to trigger each, `FIXTURE_MODE=1` as the no-key path, `make test` / `make verify`, a pointer to `CONTRACT.md` for adding another SDK, and pointers to `TALK_TRACK.md` and `docs/DESIGN-DIAGRAMS.md` for the design-only conversation.
 
 - [ ] **Step 5: Re-read the design artifact against reality**
 
