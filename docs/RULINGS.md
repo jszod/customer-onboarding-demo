@@ -743,3 +743,59 @@ fault has never been reproduced on demand, and changing fixture scope at the end
 of a task trades a rare unexplained error for a fresh class of cross-test
 interference. **Task 20 touches the test infrastructure anyway and is the right
 place.** If a third sighting lands first, do it then regardless.
+
+---
+
+## R-017 — the tracker: a broken test, and a failed run that read as a finished one
+
+**Task 18.**
+
+**1. The plan's test could not pass as written.** It builds
+`{l.split(" ", 1)[1]: l[0] for l in out.splitlines() ...}` and then looks up
+`lines["KYC review"]`. The current step's line is
+`"→ KYC review — awaiting the KYC analyst"`, so splitting on the first space
+gives the key `"KYC review — awaiting the KYC analyst"` and the lookup raises
+`KeyError`. The marker map is now built by matching each line against
+`tracker.STEPS`, which does not care what follows the step name.
+
+**2. The plan's tracker rendered a failed onboarding as seven ticks.** Its
+`TERMINAL = {"complete", "manual_intervention", "rejected_by_core"}` marks every
+step ✓ for any terminal stage. So an application rejected three times, or turned
+down by core banking, showed in the Temporal UI as a completed seven-step
+process. That is precisely the confusion R-011 fixed in the console — a finished
+process with a bad outcome is not a finished process with a good one — and §10.3
+rests on the distinction.
+
+`FAILED_AT` now maps `manual_intervention`→step 2 and `rejected_by_core`→step 3,
+the same indices R-011 chose for the console, and the run renders ✓ up to that
+step, ✗ at it, ○ after. One `stage` value, two surfaces, **and now the same
+reading on both** — which was the point of §12. Pinned by
+`test_a_failed_terminal_stage_says_so_rather_than_showing_seven_ticks`.
+
+## R-018 — R-014's deferred half, done: the field table is editable
+
+**Task 18**, as R-014 assigned it.
+
+`fieldRows` now emits a dotted `data-path` per cell — `tax_id`,
+`beneficial_owners[1].dob`, `control_person.title` — and a click turns the value
+into an input. Enter or blur commits into a `corrections` map, Escape abandons.
+On approve, corrections join the gap edits in the same `field_edits` array, with
+a guard so a field that is both a gap and a table edit is sent once. Edited
+cells are marked, so the analyst can see their own delta before approving —
+§9.1's audit rule made visible at the point of decision.
+
+**Verified in a real browser, not only by grep.** The console's tests read the
+page as text, so they would pass against a page whose JavaScript does not run.
+Chromium was driven against the page with the gateway's responses stubbed: open
+the collapsed table, correct `tax_id` (not a gap), fill the real gap, attest,
+approve — and the intercepted request body carried both entries and no page
+errors. The payload is exactly the shape Task 15's validator accepts.
+
+## Promoted to rules
+
+**A test that greps a page proves the string is there, not that the page
+works** — added to `testing.md`. Second occurrence: the console's Task 8 suite
+has always been substring assertions, and this task added four more of them
+before anything checked that the feature functioned. `node --check` on the
+extracted script catches a syntax error in seconds; a headless browser catches
+the rest.

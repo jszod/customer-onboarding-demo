@@ -59,6 +59,24 @@ as real code would.
 This has already happened twice, both times to a docstring the plan itself
 supplied. Write around the string: "a retry counter", not the expression.
 
+## Grepping a page proves the string is there, not that the page works
+
+`tests/test_console.py` reads `web/static/index.html` as text and asserts
+substrings. That is a reasonable structural gate and it is all it is: every one
+of those tests passes against a page whose JavaScript throws on load.
+
+So when you change console behaviour, check the behaviour:
+
+- `node --check` on the extracted `<script>` catches a syntax error in seconds.
+- A headless browser catches the rest. Chromium is available at
+  `/opt/pw-browsers/`, and `uv run --with playwright` gets the driver without
+  touching `pyproject.toml`. Stub the gateway's routes, drive the control, and
+  assert on the intercepted request body.
+
+R-018 did exactly this for the editable field table, and the check is what
+turned "the substring is present" into "the analyst's correction reaches
+`field_edits`".
+
 ## Test environments
 
 Use `WorkflowEnvironment.start_local()` for most tests; it is shareable via a

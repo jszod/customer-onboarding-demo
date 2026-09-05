@@ -6,21 +6,21 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–17 have landed. Task 18 is next.** Skeleton and config, models
+**Plan Tasks 1–18 have landed. Task 19 is next.** Skeleton and config, models
 and `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
 documents, core banking, the gateway, the console, all four activities, the
 extraction child, and the parent's loop and happy path.
 
-Suite: **163 passed, 4 skipped.** The 4 remaining skips are the T-REPLAY
+Suite: **174 passed, 4 skipped.** The 4 remaining skips are the T-REPLAY
 scenarios, which Task 20 owns — every other manifest scenario is live. That
 count is the progress bar, and `make verify` is correctly red until it reaches
 zero.
 
-Task 18 is the progress tracker, and it also carries R-014's deferred half:
-making the console's extracted-fields table editable. See the ruling for the
-exact steps.
+**Task 19 needs `ANTHROPIC_API_KEY`** — it records the fixtures by running the
+extraction loop live (§16.7). It is the one step a human must supply something
+for, and it only happens once; the suite runs keyless forever after.
 
-**Tasks 18–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
+**Tasks 19–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
 SDK downloads its own server binaries from `temporal.download` at runtime — the
 only download host compiled into the Rust bridge — so that host must be
 reachable, or the work must run somewhere it already is. The Temporal CLI is a
@@ -30,7 +30,7 @@ separate prerequisite for `make demo`; see the README's Setup section.
 |----------|------------|
 | `docs/superpowers/specs/2026-09-04-customer-onboarding-design.md` | **The binding authority.** 22 sections. Settles everything. |
 | `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 21 tasks, 127 steps. How the spec gets built. |
-| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. R-014 settled the last open question and left one named piece of console work for Task 18. |
+| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. R-014's deferred console work landed in Task 18 as R-018; no open questions remain. |
 | `docs/demo-brief.md` | 11 numbered decisions with the reasoning and the **rejected** alternatives. |
 | `docs/DEVELOPMENT-PROCESS.md` | The four-stage process this repo follows. |
 
