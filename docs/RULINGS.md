@@ -111,12 +111,31 @@ genuine serialization problem anywhere else still surfaces.
 
 ---
 
-## Known transient — `make verify`'s message overstates until Task 3
+## Closed — `make verify`'s false green between Tasks 1 and 3
 
-`make verify` prints "VERIFY OK: 22/22 scenarios implemented and passing"
-whenever nothing is skipped. Between Task 1 and Task 3 that is a false green:
-only `tests/test_config.py` exists, so the gate passes on 4 tests. Task 3 lands
-the 22-scenario manifest as skip-marked stubs, at which point the gate fails
-with 22 skips and the number means what it says. Not fixed here, because the
-message becomes true exactly when the manifest lands and changing it now would
-diverge from the plan's text for one task's duration.
+Recorded in Task 1: `make verify` printed "VERIFY OK: 22/22 scenarios
+implemented and passing" while only `tests/test_config.py` existed, because
+nothing was skipped. Left unfixed on the reasoning that the message becomes
+true when the manifest lands.
+
+**Closed by Task 3.** The gate now exits non-zero with `VERIFY FAILED: skipped
+tests remain (§16.8)` against 13 passed / 22 skipped, and the count means what
+it says. No code change was needed.
+
+## Known weakness — the determinism guard passes vacuously
+
+`tests/test_determinism_guard.py` walks `Path("python/workflows").rglob("*.py")`.
+Until Task 13 creates that directory there is nothing to scan, so the test
+passes on an empty set — and it would pass the same way if the directory were
+ever renamed or moved. A silent no-op is the failure mode a determinism gate
+can least afford.
+
+Verified by hand in Task 3 rather than trusted: a probe file containing
+`import httpx`, `import random` and `datetime.now()` was dropped into
+`python/workflows/` and the guard failed on all three, naming file and line.
+The probe was deleted; nothing about it is committed.
+
+Not fixed, because the honest fix — asserting the directory exists — would fail
+the suite for the ten tasks before Task 13 creates it. The file-structure table
+locks the path, and Task 20's replay tests are the real determinism gate. If
+`python/workflows/` ever moves, this guard must move with it.
