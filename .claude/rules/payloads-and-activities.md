@@ -89,4 +89,10 @@ The cost of the string name is that nothing can infer the types: every
 explicit `result_type=`, or the converter hands back a bare `dict` that looks
 like a model until something touches an attribute.
 
+The receiving end has the mirror obligation: every activity handler annotates
+its parameter (`async def open_account(req: OpenAccountRequest)`). Without the
+annotation the activity is handed a `dict`, raises on first attribute access,
+and then retries on the default unlimited policy — so the symptom is a hung
+caller rather than an error. Test stubs are handlers too.
+
 `core_banking/` never imports `temporalio` at all — it only speaks HTTP.

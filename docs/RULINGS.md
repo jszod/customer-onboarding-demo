@@ -542,3 +542,56 @@ exists and holds real workflow code, so the guard scans a non-empty set.
 Re-probed rather than assumed — a file containing `import httpx` and
 `datetime.now()` was dropped in, the guard failed naming both lines, and the
 probe was deleted. Nothing about it is committed.
+
+---
+
+## R-013 — four more defects in the plan's Task 14 code, and an off-by-one
+
+Same method as R-012: run it, don't read it.
+
+**1. The stub child cannot be a local class.** The plan builds `StubChild`
+inside `Stubs.child()` so it can close over the test's state. The SDK refuses:
+*"Local classes unsupported, `@workflow.run` cannot be on a local class"* — it
+needs the class globally referenceable by name. Moved to module scope in
+`conftest.py`, reading the active `Stubs` through a module global, with
+`tests` added to the sandbox's passthrough modules so the stub child and the
+test process see the same object. The workflow under test stays sandboxed;
+only the stub is passed through.
+
+**2. The stub activities take untyped arguments.** `async def ingest(req)` has
+nothing for the converter to build from, so the activity receives a `dict` and
+dies on `req.attempt`. This is R-012's fault 2 seen from the other end: the
+caller needs `result_type`, the handler needs an annotated parameter, and
+neither is optional.
+
+**3. Both of those present as a hang, not a failure.** An activity that raises
+retries on the default policy, which is unlimited — so the test sat until the
+10-minute cap with no output. Same shape as R-012's fault 1. The tell is in the
+worker log rather than the assertion: `Completing activity as failed` with a
+climbing `attempt` number. Look there first.
+
+**4. Off-by-one in the exhausted-attempts branch.** The `while` increments
+`_attempt` past the cap before the `else` runs, so `OnboardingResult.attempts`
+reported 4 after three rejections. `T-WF-03` and `T-WF-09` both assert 3.
+Pinned to `SETTINGS.max_attempts` in the `else`. Worth noticing that the plan's
+own tests caught this one — it is the only fault here that the plan would have
+found on its own.
+
+**Deviation, deliberate: the manifest delegates in-process, not by subprocess.**
+The plan has each `T_WF_*` manifest entry shell out to `pytest` against the
+topic test. That boots a second interpreter and a second Temporal server per
+scenario, and reports a returncode rather than an assertion. The manifest
+wrappers are `async def` taking the `env` fixture and awaiting the topic
+function directly — same delegation, one process, real failure output. The
+manifest stays the authoritative list of 22, which is what §16.8 asks for.
+
+## Promoted to rules
+
+Applying the rule of two, from this task's evidence:
+
+- **Both ends of a call need types**, not just the caller — added to
+  `workflow-determinism.md` and `payloads-and-activities.md`. Second occurrence
+  (R-012 fault 2 was the caller; this was the handler).
+- **Unlimited retry turns a defect into a hang** — the existing note covered
+  workflow tasks; extended to activities, since the symptom and the diagnosis
+  differ. Second occurrence.

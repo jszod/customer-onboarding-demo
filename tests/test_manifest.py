@@ -39,19 +39,31 @@ def test_T_ACT_03_open_account_is_idempotent():
 
 # --- §16.2 workflow tests (Tasks 14, 15, 16) ---
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_WF_01_happy_path_completes_with_client_id():
-    """Happy path completes with status="completed" and a client ID."""
+async def test_T_WF_01_happy_path_completes_with_client_id(env):
+    """Happy path completes with status="completed" and a client ID.
+
+    Delegates to tests/test_onboarding_workflow.py::test_T_WF_01_happy_path.
+    """
+    from tests.test_onboarding_workflow import test_T_WF_01_happy_path
+    await test_T_WF_01_happy_path(env)
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_WF_02_reject_increments_attempt_and_reingests():
-    """Reject increments attempt and re-runs ingest_documents."""
+async def test_T_WF_02_reject_increments_attempt_and_reingests(env):
+    """Reject increments attempt and re-runs ingest_documents.
+
+    Delegates to tests/test_onboarding_workflow.py::test_T_WF_02_reject_increments_attempt_and_reingests.
+    """
+    from tests.test_onboarding_workflow import test_T_WF_02_reject_increments_attempt_and_reingests
+    await test_T_WF_02_reject_increments_attempt_and_reingests(env)
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_WF_03_max_attempts_exhausted_is_manual_intervention():
-    """MAX_ATTEMPTS exhausted -> manual_intervention, not a failed workflow."""
+async def test_T_WF_03_max_attempts_exhausted_is_manual_intervention(env):
+    """MAX_ATTEMPTS exhausted -> manual_intervention, not a failed workflow.
+
+    Delegates to tests/test_onboarding_workflow.py::test_T_WF_03_max_attempts_exhausted_is_manual_intervention.
+    """
+    from tests.test_onboarding_workflow import test_T_WF_03_max_attempts_exhausted_is_manual_intervention
+    await test_T_WF_03_max_attempts_exhausted_is_manual_intervention(env)
 
 
 @pytest.mark.skip(reason=SKIP)
@@ -79,9 +91,13 @@ def test_T_WF_08_core_rejection_completes_as_rejected_by_core():
     """A non-retryable core rejection completes the workflow, not crashes it."""
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_WF_09_child_workflow_error_counts_as_a_spent_attempt():
-    """ChildWorkflowError is caught and counted, not propagated."""
+async def test_T_WF_09_child_workflow_error_counts_as_a_spent_attempt(env):
+    """ChildWorkflowError is caught and counted, not propagated.
+
+    Delegates to tests/test_onboarding_workflow.py::test_T_WF_09_child_workflow_error_counts_as_a_spent_attempt.
+    """
+    from tests.test_onboarding_workflow import test_T_WF_09_child_workflow_error_counts_as_a_spent_attempt
+    await test_T_WF_09_child_workflow_error_counts_as_a_spent_attempt(env)
 
 
 # --- §16.3 time-skipping tests (Task 17) ---
