@@ -314,6 +314,10 @@ demo: demo-reset up
 	@echo "  ready — click Submit on the console"
 
 temporal:
+	@command -v temporal >/dev/null 2>&1 || \
+		{ echo "Temporal CLI not on PATH — install it with: brew install temporal"; \
+		  echo "(see README Setup; make demo cannot start a dev server without it)"; \
+		  exit 1; }
 	@pgrep -f "temporal server start-dev" >/dev/null 2>&1 || \
 		(nohup temporal server start-dev --ui-port 8233 > /tmp/onboarding-temporal.log 2>&1 & \
 		 sleep 3 && echo "temporal dev server started (UI :8233)")
@@ -383,6 +387,17 @@ clean: down demo-reset
 # python/Makefile
 include ../make/common.mk
 ```
+
+**Keep the `command -v temporal` preflight.** It is not defensive clutter. The
+CLI is a setup prerequisite the README states but nothing enforces (§14 runs the
+dev server as a host process), and without the guard a missing CLI fails
+invisibly: `nohup` swallows the error into `/tmp/onboarding-temporal.log`, `make
+demo` still prints its three URLs, and the operator meets a console that loads
+and then does nothing. The guard is diagnosis only — it prints the `brew`
+command and exits non-zero. **It must never install anything.** Installing
+software as a side effect of `make` is a decision this repo has already declined:
+it would surprise an evaluator running `make deps`, and it would fight the
+Homebrew install it cannot see, upgrade, or remove.
 
 - [ ] **Step 7: Write `.gitignore` and `CLAUDE.md`**
 
@@ -5184,7 +5199,8 @@ random() call is introduced, then reverted."
 ### Task 21: Final verification and the README — TAIL, sequential
 
 **Files:**
-- Create: `README.md`
+- Modify: `README.md` — a Setup section already exists; grow the README around
+  it rather than overwriting it
 - Modify: `docs/DESIGN-DIAGRAMS.md` — nothing, but re-read it against the built system
 - Test: the full suite via `make verify`
 
@@ -5215,7 +5231,7 @@ Open `http://localhost:8233`, find `onboarding-acme-corp`, and check: `static_su
 
 - [ ] **Step 4: Write the README**
 
-Cover, in this order: what the demo shows (the three stories from §1), the seven-step flow, quickstart (`make deps`, `export ANTHROPIC_API_KEY=…`, `make demo`), the demo script from Step 2 written as a numbered walkthrough with what to say at each beat, the three failure beats and how to trigger each, `FIXTURE_MODE=1` as the no-key path, `make test` / `make verify`, a pointer to `CONTRACT.md` for adding another SDK, and pointers to `TALK_TRACK.md` and `docs/DESIGN-DIAGRAMS.md` for the design-only conversation.
+Cover, in this order: what the demo shows (the three stories from §1), the seven-step flow, the existing Setup section (Temporal CLI — `make demo` shells out to `temporal server start-dev`, and §12's UI v2.34.6 floor is checked with `temporal --version` — then uv, then the key), quickstart (`make deps`, `export ANTHROPIC_API_KEY=…`, `make demo`), the demo script from Step 2 written as a numbered walkthrough with what to say at each beat, the three failure beats and how to trigger each, `FIXTURE_MODE=1` as the no-key path, `make test` / `make verify`, a pointer to `CONTRACT.md` for adding another SDK, and pointers to `TALK_TRACK.md` and `docs/DESIGN-DIAGRAMS.md` for the design-only conversation.
 
 - [ ] **Step 5: Re-read the design artifact against reality**
 
