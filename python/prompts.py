@@ -21,7 +21,9 @@ so if one is unreadable, try the other.
 - submit_extraction — return the application and any fields you could not fill.
 - escalate — return the gaps for a human when a required field is genuinely \
 absent from every document you have read, and no unread document could \
-plausibly contain it.
+plausibly contain it. Always include `application` with every field you DID \
+manage to fill: the human picks up where you left off, and omitting it makes \
+them retype work you have already done.
 
 Never invent a value. A field you cannot find is a gap, and reporting it \
 accurately is more useful than guessing. For each gap, record which documents \
@@ -45,9 +47,11 @@ TOOLS = [
                                               "items": {"type": "object"}}},
                       "required": ["application", "gaps"]}},
     {"name": "escalate",
-     "description": "Hand the remaining gaps to a human reviewer.",
+     "description": "Hand the remaining gaps to a human reviewer, along with "
+                    "everything you were able to extract.",
      "input_schema": {"type": "object",
-                      "properties": {"gaps": {"type": "array",
+                      "properties": {"application": {"type": "object"},
+                                     "gaps": {"type": "array",
                                               "items": {"type": "object"}}},
-                      "required": ["gaps"]}},
+                      "required": ["application", "gaps"]}},
 ]

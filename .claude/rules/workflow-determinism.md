@@ -16,6 +16,71 @@ No I/O, no clocks, no randomness. Specifically: no `requests`, no `httpx`, no
 `tests/test_determinism_guard.py` greps for these. The SDK sandbox catches most
 of the rest at runtime.
 
+## Configuration is read at import time, never inside `run()`
+
+`config.settings()` reads `os.environ`, which the sandbox forbids during
+workflow execution. Call it inside `workflow.unsafe.imports_passed_through()`
+at module scope and bind the result to a module constant:
+
+```python
+with workflow.unsafe.imports_passed_through():
+    from python import config
+    SETTINGS = config.settings()
+```
+
+The sandbox is right to refuse: a workflow that re-read its config mid-run
+would replay differently after an env change.
+
+**What this does and does not buy you.** The value is fixed for the run, not
+for the process: the sandbox re-imports workflow modules, so `SETTINGS` tracks
+the environment as it was when the run started. Task 17's SLA tests rely on
+exactly that — `monkeypatch.setenv("SLA_REMIND", "1h")` reaches the workflow.
+The consequence is that hoisting removes the *sandbox violation*, not the
+replay hazard: replaying an old history under a changed env still reads the new
+value. Configuration that must survive replay belongs in the workflow's
+argument, where it is written into history.
+
+**Know the symptom, because it is not an error.** A restricted access fails the
+workflow *task*, and workflow tasks retry forever. The test does not fail — it
+hangs.
+
+## A hanging test is a retry loop — go and read the log
+
+Nothing here retries a bounded number of times by default: a failing workflow
+task retries forever, and a failing activity retries on the default policy,
+which is also unlimited. So a defect anywhere in that path presents as a test
+that never returns, with no traceback and no failing assertion. Two places to
+look, in this order:
+
+1. **The worker log.** `Completing activity as failed` with a climbing
+   `attempt` number names the activity and carries the real traceback.
+2. **The history.** For a workflow-task failure, start the workflow rather than
+   executing it, `asyncio.wait_for(handle.result(), timeout=25)`, then walk
+   `handle.fetch_history_events()` and read the task-failure message.
+
+Do not sit through the timeout a second time hoping for different output.
+
+## Both ends of a call need types
+
+**Calling:** `workflow.execute_activity("call_llm", req,
+result_type=LLMResponse, ...)`. A type annotation on the receiving variable
+deserializes nothing — the converter has no signature to infer from, so without
+`result_type` it returns a bare `dict` and the next attribute access dies. Same
+for `execute_child_workflow` and for `execute_workflow` from a client or a test.
+
+**Receiving:** every activity, workflow, signal, update and query handler
+annotates its parameter — `async def ingest(req: IngestRequest)`, never
+`async def ingest(req)`. The converter builds the model from that annotation
+and nothing else. This applies to test stubs exactly as it does to real
+handlers; an unannotated stub is the most common way to hit it.
+
+## `maximum_attempts=0` means UNLIMITED, not none
+
+Zero is the default policy's value and is what §10.2 wants for `call_llm`. If
+you intend no retry, that is `maximum_attempts=1`. Read the spec before
+"fixing" a zero you find here — the classification inside the activity, not the
+policy, is what stops a 401.
+
 ## Big things by reference, small things by value
 
 Temporal records activity inputs **and** outputs. An agent loop that passes

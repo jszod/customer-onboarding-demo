@@ -10,6 +10,33 @@ a ruling in the execution log" — but no task creates it. Task 1 does.
 Format: one entry per ruling, newest last. Say what was decided, against which
 authority, and what it cost.
 
+## Logging a ruling is half the job — promote it, or it will happen again
+
+This file is append-only and nobody reads it top to bottom. A ruling buried at
+entry 9 does not stop entry 14 from repeating it. Rules under `.claude/rules/`
+are different: they load by path scope, so they arrive in front of the person
+about to make the mistake.
+
+**The rule of two.** Promote a ruling into the matching rules file when either
+holds:
+
+1. **It has now happened twice.** Two instances is not bad luck, it is a
+   property of this codebase. Blocking I/O inside `async def` reached *three*
+   instances while staying a ruling, because nothing said when to promote it.
+2. **It will bite a task you can name.** R-012 was promoted on its first
+   occurrence because Tasks 14–18 copy the extraction child's shape, and two of
+   its three faults present as a hanging test rather than a failing one.
+
+Which file: `workflow-determinism.md` for anything under `python/workflows/`,
+`payloads-and-activities.md` for models, activities, config, web and core
+banking, `testing.md` for the suite and its gates. Promotion **copies the
+short form** — the rule states what to do and why in a few lines; the ruling
+keeps the full reasoning and the cost. Leave the ruling in place and do not
+rewrite history: the log is the record of how the rule was earned.
+
+**When to check:** at each task's Commit step, before writing the message. That
+is the moment the evidence is freshest and the cadence is already there.
+
 ---
 
 ## R-001 — `pgrep`/`pkill` guards must not match the invoking shell
@@ -472,13 +499,344 @@ the suite for the ten tasks before Task 13 creates it. The file-structure table
 locks the path, and Task 20's replay tests are the real determinism gate. If
 `python/workflows/` ever moves, this guard must move with it.
 
+---
+
+## R-012 — three defects in the plan's Task 13 code, all of which hang or lie
+
+The plan's Step 3 workflow does not run as written. Each fault was found by
+executing it, not by reading it, and each is worth naming because Tasks 14–18
+copy this shape.
+
+**1. `config.settings()` inside `run()` — the workflow hangs forever.**
+`settings()` reads `os.environ`, which the sandbox forbids at execution time:
+`RestrictedWorkflowAccessError`. That fails the workflow *task*, which retries
+indefinitely, so the symptom is not an error but a test that never returns. The
+sandbox is right — a workflow that re-read its config mid-run would replay
+differently after an env change. Moved to `SETTINGS = config.settings()` inside
+`workflow.unsafe.imports_passed_through()`, where it is an ordinary import-time
+read, frozen for the life of the worker. **Tasks 14–18 must do the same.**
+
+**2. A string-named activity needs `result_type`.** The plan writes
+`response: LLMResponse = await workflow.execute_activity("call_llm", ...)`. The
+annotation deserializes nothing; the converter has no signature to infer from
+and returns a bare `dict`, so the next line dies on `.turn`. Added
+`result_type=LLMResponse`. Same fault in the plan's test helper against
+`execute_workflow` — added `result_type=ExtractionResult` there.
+
+**3. `RetryPolicy(maximum_attempts=0)` reads as "no retries" and means the
+opposite.** Zero is unlimited. This is correct — §10.2 specifies the *default*
+policy for `call_llm`, and unlimited-with-backoff is that default — but it is
+correct by accident of a confusing spelling. I changed it to `1` on a first
+reading, which would have disabled the retry §10.2 requires, and caught it only
+by re-reading §10.2. Restored, with a comment saying what zero means. Anywhere
+this idiom is copied, the comment goes with it.
+
+Cost: one hang diagnosed by fetching workflow history under a timeout. Faults 1
+and 2 are silent — no test the plan specifies would have caught either as
+anything but a hang or an `AttributeError`.
+
+## The determinism guard is no longer vacuous
+
+The known weakness logged above is closed by this task: `python/workflows/` now
+exists and holds real workflow code, so the guard scans a non-empty set.
+Re-probed rather than assumed — a file containing `import httpx` and
+`datetime.now()` was dropped in, the guard failed naming both lines, and the
+probe was deleted. Nothing about it is committed.
+
+---
+
+## R-013 — four more defects in the plan's Task 14 code, and an off-by-one
+
+Same method as R-012: run it, don't read it.
+
+**1. The stub child cannot be a local class.** The plan builds `StubChild`
+inside `Stubs.child()` so it can close over the test's state. The SDK refuses:
+*"Local classes unsupported, `@workflow.run` cannot be on a local class"* — it
+needs the class globally referenceable by name. Moved to module scope in
+`conftest.py`, reading the active `Stubs` through a module global, with
+`tests` added to the sandbox's passthrough modules so the stub child and the
+test process see the same object. The workflow under test stays sandboxed;
+only the stub is passed through.
+
+**2. The stub activities take untyped arguments.** `async def ingest(req)` has
+nothing for the converter to build from, so the activity receives a `dict` and
+dies on `req.attempt`. This is R-012's fault 2 seen from the other end: the
+caller needs `result_type`, the handler needs an annotated parameter, and
+neither is optional.
+
+**3. Both of those present as a hang, not a failure.** An activity that raises
+retries on the default policy, which is unlimited — so the test sat until the
+10-minute cap with no output. Same shape as R-012's fault 1. The tell is in the
+worker log rather than the assertion: `Completing activity as failed` with a
+climbing `attempt` number. Look there first.
+
+**4. Off-by-one in the exhausted-attempts branch.** The `while` increments
+`_attempt` past the cap before the `else` runs, so `OnboardingResult.attempts`
+reported 4 after three rejections. `T-WF-03` and `T-WF-09` both assert 3.
+Pinned to `SETTINGS.max_attempts` in the `else`. Worth noticing that the plan's
+own tests caught this one — it is the only fault here that the plan would have
+found on its own.
+
+**Deviation, deliberate: the manifest delegates in-process, not by subprocess.**
+The plan has each `T_WF_*` manifest entry shell out to `pytest` against the
+topic test. That boots a second interpreter and a second Temporal server per
+scenario, and reports a returncode rather than an assertion. The manifest
+wrappers are `async def` taking the `env` fixture and awaiting the topic
+function directly — same delegation, one process, real failure output. The
+manifest stays the authoritative list of 22, which is what §16.8 asks for.
+
+## Promoted to rules
+
+Applying the rule of two, from this task's evidence:
+
+- **Both ends of a call need types**, not just the caller — added to
+  `workflow-determinism.md` and `payloads-and-activities.md`. Second occurrence
+  (R-012 fault 2 was the caller; this was the handler).
+- **Unlimited retry turns a defect into a hang** — the existing note covered
+  workflow tasks; extended to activities, since the symptom and the diagnosis
+  differ. Second occurrence.
+
+---
+
+## R-014 — the open question, settled: `field_edits` is not scoped to gaps
+
+**Task 15.** R-011 left this for this task, because widening it changes what
+lands in `field_edits`, which this task's validator owns.
+
+**The ruling: the workflow contract is open.** `field_edits` may target any
+path — an escalated gap, an optional field, or a field the model already
+filled in. Three things say so and nothing says otherwise:
+
+- §9.1 justifies choosing an *update* over a signal on the grounds that "the
+  analyst can *edit* field values (correcting data is much of what KYC review
+  is)". A contract that only accepts gap paths does not support that sentence.
+- §19.3 already requires accepting an edit to an **optional** field. An
+  optional field is never a gap, so the narrow reading contradicts a ruling the
+  spec makes explicitly.
+- §18's nine cuts do not include this one. Narrowing it would be a tenth,
+  unstated.
+
+Correcting a value the model read wrongly — a transposed EIN digit, a
+misparsed formation date — is the ordinary case in KYC review, not an edge
+case. Pinned by `test_an_edit_to_a_field_that_is_not_a_gap_is_accepted`, which
+edits one required field and one optional one and reads the merged value back
+out of the `status` query.
+
+No code change was needed: `gaps.apply_edits` already walked any path, and the
+validator re-checks the whole merged application rather than the edited subset.
+The contract was open; nothing had proved it.
+
+**Deferred, deliberately, and named: the console's field table.** The other
+half of R-011 is that `web/static/index.html` renders the "N fields extracted
+& verified" table read-only, so the demo cannot show the beat this ruling
+authorises. That is not settled by this task and should not be smuggled into
+it: the table is the console's most designed surface, §13 makes its visual
+design Stage 3 work under the `frontend-design` skill, and Task 15's declared
+files are the workflow and its tests. Doing it here would mean editing an
+890-line page and its test file under a task that claims to touch neither.
+
+**It is now a scoped piece of work, not an open question:** add inputs to the
+grouped table, collect them into the same `field_edits` array the gap panel
+already builds, and extend `tests/test_console.py`'s
+`test_review_payload_matches_review_submission` to cover a non-gap edit. The
+validator will accept it today. **Task 18 is the right home** — it is the next
+task that opens the console — and if it is not done there, the demo's review
+beat stays narrower than §9.1 describes.
+
+---
+
+## R-015 — the core call retries in the workflow, not in the activity policy
+
+**Task 16.** The plan asks for this to be recorded, and it is a real deviation
+from §10.2.
+
+**What §10.2 says.** `open_account`: start_to_close 5s, "initial 1s, backoff
+2.0, max interval 10s, unlimited attempts". Read literally that is a
+`RetryPolicy` on the call site, and the SDK would honour it with no loop.
+
+**What was built.** `maximum_attempts=1` on the activity, wrapped in a
+`while True` in the workflow that increments `_core_attempt`, records
+`_last_error`, and backs off with `workflow.sleep(min(10, 2 ** (n - 1)))` —
+1s, 2s, 4s, 8s, 10s, 10s… That is §10.2's curve exactly, and unlimited as it
+requires. Only the location changed.
+
+**Why.** Activity retries are invisible to workflow state — that is the point
+of them — but §13 requires the console to show `core_attempt` and `last_error`
+*while the retry is happening*, and §12 wants the beat legible on the Timeline
+without opening an activity's detail pane. The headline of this entire demo is
+a retry the audience can watch. A retry nobody can see does not tell the story,
+and there is no way to surface an in-flight activity retry into a query.
+
+Pinned by `test_the_timeout_is_visible_in_status_while_it_retries`, which polls
+`status` during the failed attempt and asserts `last_error` reads
+`"attempt 1: ..."`. Without the loop that assertion cannot pass by any means.
+
+**The cost, stated plainly.** Each attempt now writes activity-scheduled,
+activity-failed and timer events to history rather than being folded into one
+activity's retry sequence. §4.3's budget has two orders of magnitude of
+headroom, so the cost is real but not close to mattering. The second cost is
+subtler: an implementer reading §10.2 will expect a `RetryPolicy` here and find
+`maximum_attempts=1`, which reads like the retry was disabled. Hence the
+comment at the call site pointing here.
+
+**Unlimited means unlimited.** If the core banking service never answers, this
+loop waits forever, and that is correct — §10.2 says unlimited attempts, and a
+bank's core coming back in an hour is the normal case. It is not a violation of
+§10.3's "every failure path ends in a business status": waiting is not a
+failure path. The non-retryable rejection, which is one, completes as
+`rejected_by_core`.
+
+**No promotions from this task.** Nothing here has happened twice, and the
+rule of two means what it says.
+
+---
+
+## R-016 — the plan's "no timer summary" claim is wrong; §12's label is reachable
+
+**Task 17.** Step 3 instructs: *"`workflow.wait_condition(timeout=...)` does not
+accept a `summary`, so the labelled durable timer for §12 comes from the
+explicit `workflow.sleep` in Task 16 plus `set_current_details` in Task 18.
+Record this as a ruling."*
+
+**Checked rather than recorded.** `inspect.signature(workflow.wait_condition)`
+returns `['fn', 'timeout', 'timeout_summary']`. The parameter exists; it is
+named `timeout_summary`, not `summary`, which is presumably how the plan
+concluded it was absent. `workflow.sleep` takes `summary` — the two differ, and
+that is the whole of it.
+
+**So the ruling is the opposite of the one requested.** Both SLA waits now pass
+`timeout_summary`, and §12's example label — *"KYC review SLA — 3 days"* — is
+what the Timeline shows, from the mechanism §9.2 actually uses. No fallback to
+`set_current_details` is needed for this, and Task 18 does not inherit a gap.
+
+**The general point, worth more than the fix.** A ruling that records a
+limitation is a claim about the world, and this one would have been wrong in
+the permanent record — cited later as the reason the demo's timers are unlabelled.
+One `inspect.signature` call settled it. **Check a limitation before logging
+it; a plan asking for a ruling is not evidence that the limitation is real.**
+
+## Known weakness — the suite errors intermittently, twice seen, not reproduced
+
+Recording this rather than fixing it, because it has now happened twice and the
+rule of two says it stops being noise at two.
+
+**Sighting 1 (after Task 13).** `make test` exited non-zero while its own
+summary line read `129 passed, 16 skipped`. Four immediate re-runs were clean.
+The output was piped through `tail -2` and the detail was lost.
+
+**Sighting 2 (this task).** `163 passed, 4 skipped, 1 error` — one test short
+of the 163 that pass on a clean run, with the failure counted as an **error**
+rather than a failure, which in pytest means fixture setup or teardown rather
+than the test body. Four immediate re-runs were clean, all 163/4.
+
+**Hypothesis, untested.** `env` and `skip_env` are function-scoped, so the suite
+now boots roughly a dozen Temporal servers per run, each claiming ports. A port
+or startup race in that churn would present exactly this way: a fixture error,
+unreproducible, unrelated to the test that happens to catch it.
+
+**The fix, when someone takes it.** `.claude/rules/testing.md` already says
+`start_local` "is shareable via a pytest fixture" — making `env` session-scoped
+(with `loop_scope="session"`) would cut the boots to one and remove most of the
+race surface. `skip_env` must stay function-scoped: §16.3 says time-skipping
+environments cannot be shared. Not done here because the suite is green, the
+fault has never been reproduced on demand, and changing fixture scope at the end
+of a task trades a rare unexplained error for a fresh class of cross-test
+interference. **Task 20 touches the test infrastructure anyway and is the right
+place.** If a third sighting lands first, do it then regardless.
+
+**Update (R-017).** The duplicate-collection fix halves the boots on its own —
+twelve scenarios were each starting a second `WorkflowEnvironment` — so the
+race surface is already smaller than when this was written. That is a
+reduction, not a fix: the hypothesis is untested either way, and the
+session-scoped `env` above is still the change to make.
+
+## R-017 — six defects found reviewing Task 13–17 before merge
+
+A code review of the workflow branch, run against the spec rather than the
+plan. All six were live on the branch and none were caught by the 163-test
+suite, which is the part worth noticing: every one of them is a *behaviour the
+tests asserted loosely enough to miss*.
+
+**1. `escalate` threw away everything the agent had extracted.** The child
+returned `ApplicationFields()` on the escalation branch. `prompts.py` steers
+the model to escalate on exactly §8.4's missing `dob`, so the demo's headline
+beat put the analyst in front of a blank application — and their
+`beneficial_owners[1].dob` edit then had no owner 1 to address. No
+`field_edits` could recover it, because `apply_edits` cannot append list
+members. `Escalation` now carries an optional `application`, the tool schema
+and system prompt ask for it on every escalation, and the workflow passes it
+through. **The gap between "escalation is a return value, not an exception"
+(which the rules say, and which was correctly implemented) and "escalation
+carries the work done so far" is where this hid.**
+
+**2. The client-ID chase was recorded once and then silently dropped.**
+`notify` keys its records on `(client_key, outcome, recipients, detail)` —
+R-005 chose that key deliberately — and the chase's `detail` was
+byte-identical on every iteration. Every chase after the first collided with
+the first and was discarded, so an unbounded wait produced exactly one
+notification. §9.3 also says the timer reminds *and* escalates, and this only
+ever reached the onboarding specialist. The detail now carries a chase counter
+and the second chase onward reaches the supervisor. **T-TIME-03 passed
+throughout: it asserted that a chase exists, not that chases keep arriving.**
+
+**3. The exhausted-attempts path described a review that never happened.** The
+detail hard-coded `"rejected N times; last note: ..."`. Three
+`ChildWorkflowError`s exhaust the loop without a single human decision, so
+that string was simply false — and it dropped `self._last_error`, the only
+record of the real cause, from both `OnboardingResult.detail` and the
+supervisor's notification. A rejection now records its note into
+`_last_error` too, and the exhausted path reports whatever actually happened
+last.
+
+**4. A second decision could replace one the workflow had already
+acknowledged.** `submit_review`'s validator gated on stage only and the
+handler assigned unconditionally. Two updates in one activation are both
+*validated* before either handler runs, so both acked `accepted=True` and the
+last writer won — an approval silently replaced by a reject. The guard has to
+be in the handler, before any `await`, for the check and the assignment to be
+one atomic step; the validator keeps a matching check so the ordinary
+sequential case is refused before it reaches history. **A validator cannot
+enforce a property that depends on other updates in the same activation.**
+
+**5. Escalation was measured from the reminder, not from the gate.** The
+second tier waited `sla_escalate - sla_remind`, started *after* the reminder's
+`notify` returned, so escalation always landed late by that activity's
+duration, and the timeout went zero or negative when `SLA_ESCALATE <=
+SLA_REMIND`. Both tiers are now offsets from `_pending_since`. The smallest of
+the six in practice — the drift is milliseconds at realistic SLAs — but the
+negative-timeout case worked only by accident.
+
+**6. Twelve scenarios ran twice.** The `T_WF_*`/`T_TIME_*` manifest wrappers
+delegated to functions named `test_...` in the topic modules, which pytest
+collects on their own as well, so each scenario booted a second
+`WorkflowEnvironment` for no added coverage. The T-CHILD and T-ACT wrappers
+already avoided this by naming their helpers `assert_...`; the workflow
+scenarios now do the same. 163 tests → 151, runtime 48s → 30s, and the
+manifest IDs are untouched.
+
+**On the tests.** Six new regression tests, each confirmed to fail on the
+pre-fix code and pass after — the check that separates a regression test from
+a restatement. Three further tests were written, passed against the unfixed
+code, and were kept as characterization rather than deleted or dressed up as
+pins: an escalation with no application still returning cleanly, a
+misconfigured `SLA_ESCALATE <= SLA_REMIND` still firing both tiers, and a late
+reject after a completed approval (which the *stage* guard already refused —
+the same-activation race is the case the new handler guard actually closes).
+**A test that passes before the fix pins nothing; say so rather than counting
+it.** Defect 5 needed a deliberately slow `notify` before its drift was
+observable at all, and is asserted against the timer duration recorded in
+history rather than against wall-clock arrival, so it does not depend on
+scheduling luck.
+
 ## R-018 — eight defects found reviewing the merged activity and tooling code
 
 Numbered R-018 rather than R-017 on purpose: R-017 is the parallel review of
-the Task 13–17 workflow branch, which is in flight on its own branch. Two
-reviews ran at once and the numbers were reserved so the entries could not
-collide; if that branch lands second, the log reads out of order and that is
-the lesser problem.
+the Task 13–17 workflow branch, which was in flight on its own branch when
+this was written. Two reviews ran at once and the numbers were reserved so the
+entries could not collide. **It worked**: this one merged first, R-017 landed
+after it, and the merge put both in number order above. The reservation cost
+nothing and the alternative — two entries both called R-017 — would have been
+unrecoverable in a log that is only useful if its references resolve.
 
 This one covers what was already on `main` — the activities, the fake core
 banking service, and the Makefile.

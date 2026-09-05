@@ -34,6 +34,8 @@ Every task's requirements implicitly include this section. Values are copied ver
 - **Timeouts:** `ingest_documents` 30s · `call_llm` 120s · `open_account` **5s** · `send_documents` 60s · `notify` 30s (§10.2).
 - **Caps:** `MAX_ATTEMPTS=3`, `MAX_ITERATIONS=8` — these are the history bound, not arbitrary limits (§4.3).
 - **Exactly three optional application fields:** `dba`, `phone`, `website`. Everything else is required (§5.1).
+- **Log every deviation as a ruling in `docs/RULINGS.md`** — a gap the spec and plan both leave, or a place the plan's own code is wrong. Say what was decided, against which authority, and what it cost.
+- **At the Commit step, before writing the message, promote what you learned.** Re-read the rulings you added: does any of them meet the rule of two in `RULINGS.md`'s header — a second occurrence, or a fault that will bite a task you can name? If so, copy the short form into the matching file under `.claude/rules/` in the same commit. A ruling nobody reads before repeating the mistake bought nothing.
 
 ---
 
@@ -4602,6 +4604,8 @@ equivalent information goes into set_current_details instead."
 ---
 
 ### Task 18: The progress tracker — TRACK A
+
+**Also settle R-014's deferred half here.** The console's "N fields extracted & verified" table is read-only; R-014 ruled that `field_edits` accepts any path and the validator already does. Add inputs to the grouped table, collect them into the same `field_edits` array the gap panel builds, and extend `tests/test_console.py::test_review_payload_matches_review_submission` to cover a non-gap edit. Without it the demo's review beat stays narrower than §9.1 describes.
 
 §12. One `stage` value, two surfaces. The console draws a stepper; the Temporal UI renders the same information as Current Details.
 
