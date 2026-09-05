@@ -6,14 +6,25 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Design and plan are complete. Implementation is underway: plan Task 1 has
-landed (skeleton, config, Makefile). Tasks 2 and 3 are next and gate
-everything else.**
+**Plan Tasks 1–12 have landed. Task 13 is next.** Everything that does not
+need a running Temporal server is done: skeleton and config, models and
+`CONTRACT.md`, the 22-scenario manifest, the design artifact, sample documents,
+core banking, the gateway, the console, and all four activities.
+
+Suite: **124 passed, 19 skipped.** The 19 skips are the manifest scenarios not
+yet implemented — that count is the progress bar, and `make verify` is
+correctly red until it reaches zero. T-ACT-01/02/03 are already live.
+
+**Task 13 needs a Temporal server** (`WorkflowEnvironment.start_local`), as do
+Tasks 14–20. The SDK downloads its own server binaries from `temporal.download`
+at runtime — the only download host compiled into the Rust bridge — so that
+host must be reachable, or the work must run somewhere it already is.
 
 | Document | What it is |
 |----------|------------|
 | `docs/superpowers/specs/2026-09-04-customer-onboarding-design.md` | **The binding authority.** 22 sections. Settles everything. |
 | `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 21 tasks, 127 steps. How the spec gets built. |
+| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Read before Task 13 — it carries two recurring traps and one open question that Task 15 must settle. |
 | `docs/demo-brief.md` | 11 numbered decisions with the reasoning and the **rejected** alternatives. |
 | `docs/DEVELOPMENT-PROCESS.md` | The four-stage process this repo follows. |
 
