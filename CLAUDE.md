@@ -6,12 +6,25 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Design is complete; no implementation code exists yet.**
+**Plan Tasks 1–12 have landed. Task 13 is next.** Everything that does not
+need a running Temporal server is done: skeleton and config, models and
+`CONTRACT.md`, the 22-scenario manifest, the design artifact, sample documents,
+core banking, the gateway, the console, and all four activities.
+
+Suite: **124 passed, 19 skipped.** The 19 skips are the manifest scenarios not
+yet implemented — that count is the progress bar, and `make verify` is
+correctly red until it reaches zero. T-ACT-01/02/03 are already live.
+
+**Task 13 needs a Temporal server** (`WorkflowEnvironment.start_local`), as do
+Tasks 14–20. The SDK downloads its own server binaries from `temporal.download`
+at runtime — the only download host compiled into the Rust bridge — so that
+host must be reachable, or the work must run somewhere it already is.
 
 | Document | What it is |
 |----------|------------|
 | `docs/superpowers/specs/2026-09-04-customer-onboarding-design.md` | **The binding authority.** 22 sections. Settles everything. |
 | `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 21 tasks, 127 steps. How the spec gets built. |
+| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Read before Task 13 — it carries two recurring traps and one open question that Task 15 must settle. |
 | `docs/demo-brief.md` | 11 numbered decisions with the reasoning and the **rejected** alternatives. |
 | `docs/DEVELOPMENT-PROCESS.md` | The four-stage process this repo follows. |
 
@@ -37,8 +50,6 @@ they cover. The ones that bind everywhere:
 
 ## Commands
 
-Nothing below exists until plan Task 1 runs.
-
     make deps          # uv sync
     make demo          # reset state, start everything, print URLs
     make up / down / status / logs
@@ -56,6 +67,20 @@ Nothing below exists until plan Task 1 runs.
 The parent's workflow ID is derived from the client key, not a UUID — Temporal
 then forbids two open onboardings for one client, which is a real compliance
 property rather than tidiness.
+
+## The determinism rule
+
+No I/O, no clocks, no randomness in `python/workflows/`. No `requests`,
+`httpx`, `datetime.now()`, `time.time()`, or `random`. Use `workflow.now()`
+and `workflow.uuid4()`. Everything non-deterministic goes in an activity.
+`tests/test_determinism_guard.py` (§16.6) enforces this once Task 3 lands.
+
+Document content never enters workflow history — workflows carry `DocumentRef`s
+and doc ids; activities resolve them to text internally (§8.1, §8.2).
+
+The data converter is built in exactly one place, `config.build_data_converter()`
+(§17). Worker, gateway, core-banking callback and tests all use it; a mismatch
+produces deserialization errors that look like corruption rather than config.
 
 ## Layout
 

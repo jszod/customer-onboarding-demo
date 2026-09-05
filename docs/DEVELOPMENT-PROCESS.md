@@ -190,8 +190,18 @@ rules, patterns, and troubleshooting references.
       [`docs/superpowers/specs/2026-09-04-customer-onboarding-design.md`](superpowers/specs/2026-09-04-customer-onboarding-design.md)
       and self-reviewed. Decision reasoning and rejected alternatives are in
       [demo-brief.md](demo-brief.md).
-- [ ] **Awaiting human review of the spec** — the hard gate. No code until
-      this clears.
-- [ ] Stage 2 — Plan
-- [ ] Stage 3 — Build
+- [x] **Spec review cleared** — the hard gate. Planning proceeded on the
+      approved spec.
+- [x] **Stage 2 — Plan.** 21 tasks, 127 steps, written to
+      [`docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md`](superpowers/plans/2026-09-04-customer-onboarding-demo.md)
+      and self-reviewed against the spec. The self-review closed four coverage
+      gaps: §19.1 dotted paths for list members, §19.3 an edit to an optional
+      field, §19.4 no fourth child on final rejection, and §10.4's LLM-outage
+      toggle, which the console surfaced but no activity consumed.
+- [ ] **Stage 3 — Build.** Not started; no implementation code exists. Zero of
+      the plan's 127 steps are checked. Begins at Task 1 (skeleton, config,
+      Makefile); Tasks 1→2→3 are sequential and gate everything, and Task 3 —
+      the 22-scenario manifest — is the verification gate the rest of the
+      build depends on. The plan's Execution Handoff still awaits a choice
+      between subagent-driven and inline execution.
 - [ ] Stage 4 — Verify

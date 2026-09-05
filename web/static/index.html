@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commercial Onboarding — Operations Console</title>
+<style>
+/* ---------------------------------------------------------------------------
+   §13. One page, three controls, one per actor (§3). Projected on a laptop in
+   a customer meeting: scanned, not read. Large type, high contrast, state
+   carried by colour AND shape so it survives a bad projector.
+--------------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+  --bg:        #f4f2ee;
+  --surface:   #ffffff;
+  --surface-2: #faf9f6;
+  --ink:       #14161b;
+  --muted:     #5d6472;
+  --line:      #e3e0d8;
+  --line-2:    #cfcbc0;
+  --accent:    #2a4b9b;
+  --accent-in: #ffffff;
+  --accent-bg: #eaeffb;
+  --done:      #16755a;
+  --done-bg:   #e6f3ee;
+  --wait:      #a1620a;
+  --wait-bg:   #fbf1e0;
+  --alert:     #ab2020;
+  --alert-bg:  #fbebe9;
+  --shadow:    0 1px 2px rgba(20,22,27,.06), 0 6px 20px rgba(20,22,27,.05);
+  --radius:    10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg:        #0e1014;
+    --surface:   #171a20;
+    --surface-2: #1d212a;
+    --ink:       #eef0f4;
+    --muted:     #99a1b2;
+    --line:      #272c36;
+    --line-2:    #38404e;
+    --accent:    #7fa3ff;
+    --accent-in: #0e1014;
+    --accent-bg: #1b2436;
+    --done:      #4ac79b;
+    --done-bg:   #142b25;
+    --wait:      #e8ad4a;
+    --wait-bg:   #2c2415;
+    --alert:     #ff7b72;
+    --alert-bg:  #2e1a1a;
+    --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  font-feature-settings: "cv05", "ss01";
+}
+code, .mono {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: .86em;
+  letter-spacing: -.01em;
+}
+h1, h2, h3 { margin: 0; font-weight: 620; letter-spacing: -.015em; }
+button { font: inherit; }
+
+/* --- top bar ------------------------------------------------------------ */
+.topbar {
+  display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+  padding: 14px 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 11px; }
+.mark {
+  width: 34px; height: 34px; border-radius: 8px; flex: none;
+  background: var(--accent); color: var(--accent-in);
+  display: grid; place-items: center; font-size: 17px; font-weight: 700;
+}
+.brand-name { font-size: 15px; font-weight: 640; letter-spacing: -.01em; }
+.brand-sub  { font-size: 12px; color: var(--muted); }
+.client { margin-left: 6px; padding-left: 24px; border-left: 1px solid var(--line); }
+.client-name { font-size: 21px; font-weight: 640; letter-spacing: -.02em; }
+.client-meta { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.client-meta code { color: var(--muted); }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.tui-link {
+  color: var(--muted); text-decoration: none; font-size: 13px;
+  border: 1px solid var(--line-2); border-radius: 999px; padding: 5px 13px;
+  white-space: nowrap;
+}
+.tui-link:hover { color: var(--ink); border-color: var(--ink); }
+
+/* --- stage pill --------------------------------------------------------- */
+.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px 6px 11px; border-radius: 999px;
+  font-size: 13.5px; font-weight: 600; letter-spacing: .01em;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.pill::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%;
+  background: currentColor; flex: none;
+}
+.pill.is-idle    { color: var(--muted); background: var(--surface-2); border-color: var(--line); }
+.pill.is-running { color: var(--accent); background: var(--accent-bg); }
+.pill.is-waiting { color: var(--wait);   background: var(--wait-bg); }
+.pill.is-done    { color: var(--done);   background: var(--done-bg); }
+.pill.is-alert   { color: var(--alert);  background: var(--alert-bg); }
+.pill.is-running::before, .pill.is-waiting::before { animation: beat 1.8s ease-in-out infinite; }
+@keyframes beat { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .pill::before { animation: none !important; } }
+
+/* --- layout ------------------------------------------------------------- */
+main { max-width: 1180px; margin: 0 auto; padding: 26px 28px 72px; }
+.panel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* --- stepper ------------------------------------------------------------ */
+.stepper {
+  list-style: none; margin: 0 0 22px; padding: 0;
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px;
+}
+.stepper li {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 12px 12px 13px; position: relative; overflow: hidden;
+}
+.stepper li::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 4px;
+  background: var(--line-2);
+}
+.step-n {
+  display: inline-grid; place-items: center;
+  width: 21px; height: 21px; border-radius: 50%;
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: var(--surface-2); color: var(--muted);
+  border: 1px solid var(--line-2);
+}
+.step-label {
+  display: block; margin-top: 9px;
+  font-size: 13.5px; font-weight: 560; letter-spacing: -.01em; color: var(--muted);
+}
+.stepper li.is-done::before    { background: var(--done); }
+.stepper li.is-done .step-n    { background: var(--done); border-color: var(--done); color: var(--surface); font-size: 12px; }
+.stepper li.is-done .step-label { color: var(--ink); }
+.stepper li.is-current         { border-color: var(--accent); background: var(--accent-bg); }
+.stepper li.is-current::before { background: var(--accent); }
+.stepper li.is-current .step-n { background: var(--accent); border-color: var(--accent); color: var(--accent-in); }
+.stepper li.is-current .step-label { color: var(--ink); font-weight: 680; }
+.stepper li.is-failed          { border-color: var(--alert); background: var(--alert-bg); }
+.stepper li.is-failed::before  { background: var(--alert); }
+.stepper li.is-failed .step-n  { background: var(--alert); border-color: var(--alert); color: #fff; }
+.stepper li.is-failed .step-label { color: var(--ink); font-weight: 680; }
+@media (max-width: 900px) { .stepper { grid-template-columns: repeat(4, 1fr); } }
+
+/* --- stage detail ------------------------------------------------------- */
+.detail { padding: 20px 22px; margin-bottom: 18px; }
+.detail-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.detail-title { font-size: 19px; font-weight: 640; letter-spacing: -.02em; }
+.detail-note { color: var(--muted); font-size: 14px; margin-top: 7px; max-width: 78ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 10px 34px; margin-top: 16px; }
+.fact-k { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.fact-v { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 3px; }
+.fact-v.is-alert { color: var(--alert); }
+.fact-v.is-done  { color: var(--done); }
+.errline {
+  margin-top: 15px; padding: 11px 14px; border-radius: 8px;
+  background: var(--alert-bg); border: 1px solid color-mix(in srgb, var(--alert) 32%, transparent);
+  color: var(--ink); font-size: 14px;
+}
+.errline b { color: var(--alert); }
+
+/* --- review panel ------------------------------------------------------- */
+.review { margin-bottom: 18px; overflow: hidden; }
+.review-head {
+  padding: 16px 22px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+}
+.review-head h2 { font-size: 17px; }
+.review-who { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+.gaps { border-left: 4px solid var(--alert); background: var(--alert-bg); padding: 18px 22px; }
+.gaps-title { font-size: 15.5px; font-weight: 680; color: var(--ink); }
+.gaps-sub { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.gap { margin-top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.gap-label { font-size: 15px; font-weight: 640; letter-spacing: -.01em; }
+.gap-path { font-size: 12px; color: var(--muted); margin-left: 8px; }
+.gap-reason { font-size: 13.5px; color: var(--muted); margin-top: 5px; }
+.gap-docs { margin-top: 9px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.gap-docs .eyebrow { margin-right: 2px; }
+.chip {
+  font-size: 11.5px; padding: 3px 9px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line-2); color: var(--muted);
+}
+.gap input[type=text] {
+  margin-top: 11px; width: 100%; max-width: 460px;
+  padding: 9px 12px; font: inherit; font-size: 15px;
+  color: var(--ink); background: var(--surface-2);
+  border: 1px solid var(--line-2); border-radius: 7px;
+}
+.gap input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.gap input[type=text].is-empty { border-color: var(--alert); }
+
+.verified { padding: 4px 22px 6px; }
+.verified summary {
+  cursor: pointer; list-style: none; padding: 13px 0;
+  font-size: 14px; color: var(--muted); display: flex; align-items: center; gap: 9px;
+}
+.verified summary::-webkit-details-marker { display: none; }
+.verified summary::before {
+  content: "▸"; color: var(--muted); font-size: 12px; transition: transform .12s ease;
+}
+.verified[open] summary::before { transform: rotate(90deg); }
+.verified summary b { color: var(--done); font-variant-numeric: tabular-nums; }
+.grp { margin: 6px 0 18px; }
+.grp h3 { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin-bottom: 7px; }
+table.fields { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.fields th, table.fields td {
+  text-align: left; padding: 7px 12px 7px 0; border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+table.fields th { font-weight: 500; color: var(--muted); width: 240px; }
+table.fields td { font-weight: 520; }
+table.fields td.empty { color: var(--alert); font-weight: 500; }
+
+.review-actions {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 16px 22px; border-top: 1px solid var(--line); background: var(--surface-2);
+}
+.attest { display: flex; align-items: center; gap: 9px; font-size: 14.5px; cursor: pointer; }
+.attest input { width: 17px; height: 17px; accent-color: var(--accent); }
+.spacer { flex: 1 1 auto; }
+.msg { font-size: 13.5px; color: var(--muted); }
+.msg.is-alert { color: var(--alert); font-weight: 560; }
+.msg.is-done  { color: var(--done);  font-weight: 560; }
+
+/* --- buttons ------------------------------------------------------------ */
+.btn {
+  border-radius: 8px; padding: 9px 17px; font-size: 14.5px; font-weight: 600;
+  border: 1px solid var(--line-2); background: var(--surface); color: var(--ink);
+  cursor: pointer; letter-spacing: -.005em; white-space: nowrap;
+}
+.btn:hover:not(:disabled) { border-color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-in); }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn.go { background: var(--done); border-color: var(--done); color: #fff; }
+.btn.go:hover:not(:disabled) { filter: brightness(1.08); }
+.btn.quiet { background: transparent; }
+
+/* --- controls / demo ---------------------------------------------------- */
+.cols { display: grid; grid-template-columns: 1.55fr 1fr; gap: 18px; align-items: start; }
+@media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+.card-head { padding: 15px 20px 0; }
+.card-body { padding: 14px 20px 18px; }
+.action { display: flex; align-items: flex-start; gap: 14px; padding: 11px 0; }
+.action + .action { border-top: 1px solid var(--line); }
+.action .txt { flex: 1 1 auto; }
+.action .who { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.action .sub { font-size: 13px; color: var(--muted); margin-top: 3px; max-width: 46ch; }
+.toggle { display: flex; align-items: flex-start; gap: 11px; padding: 11px 0; cursor: pointer; }
+.toggle + .toggle { border-top: 1px solid var(--line); }
+.toggle input { margin-top: 3px; width: 17px; height: 17px; accent-color: var(--accent); flex: none; }
+.toggle .t { font-size: 14.5px; font-weight: 560; }
+.toggle .sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; max-width: 40ch; }
+.footnote { margin-top: 22px; font-size: 12px; color: var(--muted); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">◈</span>
+    <div>
+      <div class="brand-name">Commercial Onboarding</div>
+      <div class="brand-sub">Business account opening</div>
+    </div>
+  </div>
+  <div class="client">
+    <div class="client-name" id="client-name">Acme Holdings LLC</div>
+    <div class="client-meta">
+      Client <code id="client-key">acme-corp</code> · Case <code id="workflow-id">onboarding-acme-corp</code>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="pill is-idle" id="stage-pill">Not started</span>
+    <a class="tui-link" id="temporal-link" target="_blank" rel="noopener"
+       href="http://localhost:8233/namespaces/default/workflows/onboarding-acme-corp">Temporal UI ↗</a>
+  </div>
+</header>
+
+<main>
+  <!-- §12/§13: one source (stage), two surfaces. -->
+  <ol class="stepper" id="stepper" aria-label="Onboarding progress">
+    <li data-step="0"><span class="step-n">1</span><span class="step-label">Collect docs</span></li>
+    <li data-step="1"><span class="step-n">2</span><span class="step-label">Extract</span></li>
+    <li data-step="2"><span class="step-n">3</span><span class="step-label">KYC review</span></li>
+    <li data-step="3"><span class="step-n">4</span><span class="step-label">Open account</span></li>
+    <li data-step="4"><span class="step-n">5</span><span class="step-label">Client ID</span></li>
+    <li data-step="5"><span class="step-n">6</span><span class="step-label">Send docs</span></li>
+    <li data-step="6"><span class="step-n">7</span><span class="step-label">Notify</span></li>
+  </ol>
+
+  <section class="panel detail" id="detail" aria-live="polite"></section>
+
+  <!-- Gap-first review panel — the KYC/AML analyst's surface (§13, §9.1). -->
+  <section class="panel review" id="review" hidden>
+    <div class="review-head">
+      <h2>KYC review</h2>
+      <span class="pill is-waiting" id="review-age">waiting</span>
+      <span class="review-who">Assigned to <b>kyc-analyst-1</b> · segregation of duties: the specialist who prepared this file cannot sign it off</span>
+    </div>
+
+    <div class="gaps" id="gaps-block">
+      <div class="gaps-title" id="gaps-title">1 field needs you</div>
+      <div class="gaps-sub">The extraction agent searched the documents below and could not read these values. Fill them in from the source file, or reject the file back for another pass.</div>
+      <div id="gaps-list"></div>
+    </div>
+
+    <details class="verified" id="verified">
+      <summary><span id="verified-count">0 fields extracted &amp; verified</span></summary>
+      <div id="verified-body"></div>
+    </details>
+
+    <div class="review-actions">
+      <label class="attest" for="attested">
+        <input type="checkbox" id="attested">
+        <span>I have reviewed the extracted data</span>
+      </label>
+      <button class="btn go" id="approve-btn" disabled>Approve &amp; open the account</button>
+      <button class="btn quiet" id="reject-btn">Reject — send back…</button>
+      <span class="msg" id="review-msg"></span>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="panel">
+      <div class="card-head"><span class="eyebrow">Case actions</span></div>
+      <div class="card-body">
+        <div class="action">
+          <div class="txt">
+            <div class="who">Onboarding specialist</div>
+            <div><b>Submit application for Acme Corp</b></div>
+            <div class="sub">Files the client's five documents and opens the case. Only one onboarding may be open per client.</div>
+          </div>
+          <button class="btn primary" id="submit-btn">Submit application</button>
+        </div>
+        <div class="msg" id="submit-msg"></div>
+        <div class="action">
+          <div class="txt">
+            <div class="who">Core banking</div>
+            <div><b>Return client ID</b></div>
+            <div class="sub">Stands in for the core system's operator: assigns the client ID and calls us back.</div>
+          </div>
+          <button class="btn" id="assign-btn" disabled>Return client ID</button>
+        </div>
+        <div class="msg" id="assign-msg"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="card-head"><span class="eyebrow">Demo controls</span></div>
+      <div class="card-body">
+        <label class="toggle">
+          <input type="checkbox" id="slow-first-call">
+          <span>
+            <span class="t">Slow first core-banking call</span>
+            <span class="sub">The core takes longer to answer than our 5s timeout, so the account request looks lost and is retried.</span>
+          </span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="llm-down">
+          <span>
+            <span class="t">Model outage</span>
+            <span class="sub">Extraction calls start failing; the agent loop retries and resumes where it stopped.</span>
+          </span>
+        </label>
+        <div class="msg" id="control-msg"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="footnote" id="poll-note">Status refreshes every 2 seconds.</div>
+</main>
+
+<script>
+"use strict";
+/* ---------------------------------------------------------------------------
+   Everything below renders from a single `status` query payload (§5.6).
+   No frameworks, no build step, no external assets.
+--------------------------------------------------------------------------- */
+const CLIENT_KEY  = "acme-corp";
+const CLIENT_NAME = "Acme Holdings LLC";
+const WORKFLOW_ID = "onboarding-" + CLIENT_KEY;
+const ANALYST_ID  = "kyc-analyst-1";
+const POLL_MS     = 2000;
+
+/* stage -> stepper index. `complete` is 7: every step is behind us.
+   The two terminal failures freeze on the step that produced them. */
+const STAGE_INDEX = {
+  ingesting: 0, extracting: 1, awaiting_review: 2, submitting_to_core: 3,
+  awaiting_client_id: 4, sending_documents: 5, notifying: 6, complete: 7,
+  manual_intervention: 2, rejected_by_core: 3,
+};
+const TERMINAL_BAD = { manual_intervention: true, rejected_by_core: true };
+
+const STAGE_LABEL = {
+  ingesting: "Collecting documents",
+  extracting: "Extracting the application",
+  awaiting_review: "Waiting on KYC review",
+  submitting_to_core: "Submitting to core banking",
+  awaiting_client_id: "Waiting on core banking",
+  sending_documents: "Sending documents",
+  notifying: "Notifying the client",
+  complete: "Account open",
+  manual_intervention: "Manual intervention",
+  rejected_by_core: "Rejected by core banking",
+};
+const STAGE_TONE = {
+  ingesting: "is-running", extracting: "is-running",
+  awaiting_review: "is-waiting", submitting_to_core: "is-running",
+  awaiting_client_id: "is-waiting", sending_documents: "is-running",
+  notifying: "is-running", complete: "is-done",
+  manual_intervention: "is-alert", rejected_by_core: "is-alert",
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v == null ? "" : v)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;");
+
+/* --- field labels, in the analyst's language, not the schema's ----------- */
+const LEAF_LABEL = {
+  legal_name: "Legal name", dba: "DBA", entity_type: "Entity type",
+  formation_date: "Formation date", formation_state: "Formation state",
+  tax_id: "Tax ID (EIN)", registered_address: "Registered address",
+  business_address: "Business address", industry_code: "Industry code",
+  phone: "Phone", website: "Website", full_name: "Full name",
+  dob: "Date of birth", ownership_pct: "Ownership %",
+  residential_address: "Residential address", id_type: "ID type",
+  id_number: "ID number", title: "Title",
+  is_authorized_signatory: "Authorised signatory",
+  beneficial_owners: "Beneficial owners", control_person: "Control person",
+};
+const humanLeaf = (name) => LEAF_LABEL[name] ||
+  name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+
+/** "beneficial_owners[1].dob" -> "Beneficial owner 2 — date of birth" */
+function humanPath(path) {
+  const parts = String(path).split(".");
+  const out = [];
+  for (const raw of parts) {
+    const m = raw.match(/^([a-z_]+)\[(\d+)\]$/);
+    if (m && m[1] === "beneficial_owners") out.push("Beneficial owner " + (Number(m[2]) + 1));
+    else if (m) out.push(humanLeaf(m[1]) + " " + (Number(m[2]) + 1));
+    else out.push(humanLeaf(raw));
+  }
+  const head = out.slice(0, -1).join(" · ");
+  const tail = out[out.length - 1];
+  return head ? head + " — " + tail : tail;
+}
+
+const DOC_LABEL = {
+  articles_of_incorporation: "Articles of incorporation",
+  business_license: "Business licence", ein_letter: "EIN letter",
+  w9: "W-9", ownership_declaration: "Ownership declaration",
+};
+
+/* --- value formatting --------------------------------------------------- */
+function isBlank(v) {
+  return v === null || v === undefined || v === "" ||
+         (Array.isArray(v) && v.length === 0);
+}
+function fmtAddress(a) {
+  return [a.line1, a.line2, a.city,
+          [a.state, a.postal_code].filter(Boolean).join(" "), a.country]
+         .filter((p) => p !== null && p !== undefined && p !== "").join(", ");
+}
+function fmtValue(v) {
+  if (isBlank(v)) return null;
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (typeof v === "object" && !Array.isArray(v)) {
+    if ("line1" in v || "postal_code" in v) return fmtAddress(v);
+    return JSON.stringify(v);
+  }
+  return String(v);
+}
+/** Count the filled leaves — what "28 fields extracted & verified" means. */
+function countFilled(node) {
+  if (isBlank(node)) return 0;
+  if (Array.isArray(node)) return node.reduce((n, x) => n + countFilled(x), 0);
+  if (typeof node === "object") {
+    return Object.values(node).reduce((n, x) => n + countFilled(x), 0);
+  }
+  return 1;
+}
+function humanAge(iso) {
+  if (!iso) return null;
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return null;
+  let s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+  return Math.floor(s / 86400) + "d " + Math.floor((s % 86400) / 3600) + "h";
+}
+
+/* --- local state -------------------------------------------------------- */
+let last = null;          // last status payload, or null when nothing runs
+let gapEdits = {};        // field_path -> analyst's typed value
+let gapSig = "";          // rebuild the gap inputs only when the gaps change
+let appSig = "";          // ditto for the verified-fields table
+let reviewBusy = false;
+
+/* --- stepper ------------------------------------------------------------ */
+function renderStepper(st) {
+  const idx = st ? (STAGE_INDEX[st.stage] ?? 0) : -1;
+  const bad = st ? !!TERMINAL_BAD[st.stage] : false;
+  for (const li of $("stepper").children) {
+    const i = Number(li.dataset.step);
+    li.classList.remove("is-done", "is-current", "is-failed");
+    if (idx < 0) continue;
+    if (i < idx) li.classList.add("is-done");
+    else if (i === idx) li.classList.add(bad ? "is-failed" : "is-current");
+  }
+}
+
+/* --- stage detail panel ------------------------------------------------- */
+function fact(k, v, cls) {
+  return '<div><div class="fact-k">' + esc(k) + '</div>' +
+         '<div class="fact-v ' + (cls || "") + '">' + esc(v) + "</div></div>";
+}
+function renderDetail(st) {
+  const el = $("detail");
+  if (!st) {   /* 404 from the gateway: nothing is running. Neutral, not red. */
+    el.innerHTML =
+      '<div class="detail-head"><span class="detail-title">No onboarding open for ' +
+      esc(CLIENT_NAME) + "</span></div>" +
+      '<div class="detail-note">Submit the application below to open the case. ' +
+      "Temporal will refuse a second open onboarding for this client, which is " +
+      "how the one-case-per-client rule is enforced rather than merely documented.</div>";
+    return;
+  }
+  const s = st.stage;
+  let title = STAGE_LABEL[s] || s;
+  let note = "";
+  let facts = "";
+  let err = "";
+
+  if (s === "ingesting") {
+    note = "Copying the client's documents into this attempt's working folder and hashing them.";
+    facts = fact("Attempt", st.attempt);
+  } else if (s === "extracting") {
+    note = "The extraction agent is reading the documents and filling the application. " +
+           "It stops when every required field is filled or it runs out of documents to consult.";
+    facts = fact("Attempt", "attempt " + st.attempt) +
+            fact("Iteration", "iteration " + (st.extraction_iterations || 0));
+  } else if (s === "awaiting_review") {
+    title = "Waiting on the KYC analyst";
+    note = "The case is parked. Reminders and escalation are on a timer; nothing here " +
+           "approves itself.";
+    facts = fact("Attempt", st.attempt) +
+            fact("Fields needing you", (st.gaps || []).length,
+                 (st.gaps || []).length ? "is-alert" : "is-done") +
+            fact("Waiting", humanAge(st.pending_since) || "just now");
+  } else if (s === "submitting_to_core") {
+    note = "The core banking system has not answered inside our 5-second timeout. " +
+           "We retry with the same idempotency key, so a slow first call cannot open a second account.";
+    facts = fact("Core attempt", st.core_attempt, st.core_attempt > 1 ? "is-alert" : "") +
+            fact("Idempotency key", WORKFLOW_ID);
+    if (st.last_error) {
+      err = '<div class="errline"><b>Last error</b> — ' + esc(st.last_error) + "</div>";
+    }
+  } else if (s === "awaiting_client_id") {
+    note = "The account request was accepted. We are asleep until the core system returns " +
+           "the client ID — at zero cost, for as long as it takes.";
+    facts = fact("Core request", st.core_request_id || "—") +
+            fact("Waiting", humanAge(st.pending_since) || "just now");
+  } else if (s === "sending_documents") {
+    note = "Writing the welcome pack and the signature card to the client's outbox.";
+    facts = fact("Client ID", st.client_id || "—");
+  } else if (s === "notifying") {
+    note = "Sending the client and the onboarding specialist their confirmations.";
+    facts = fact("Client ID", st.client_id || "—");
+  } else if (s === "complete") {
+    title = "Account open";
+    note = "Every step completed. The client ID below is the one and only account " +
+           "opened for this application.";
+    facts = fact("Client ID", st.client_id || "—", "is-done") +
+            fact("Extraction attempts", st.attempt) +
+            fact("Core attempts", st.core_attempt);
+  } else if (s === "manual_intervention") {
+    title = "Sent for manual intervention";
+    note = "Extraction could not complete the application inside the attempt budget. " +
+           "The case completed with a business outcome and is now with a human — it did not fail.";
+    facts = fact("Attempts used", st.attempt, "is-alert") +
+            fact("Fields outstanding", (st.gaps || []).length, "is-alert");
+    if (st.last_error) err = '<div class="errline"><b>Reason</b> — ' + esc(st.last_error) + "</div>";
+  } else if (s === "rejected_by_core") {
+    title = "Rejected by core banking";
+    note = "The core system refused the application outright. Nothing to retry: the case " +
+           "completed with a terminal business status.";
+    facts = fact("Core attempts", st.core_attempt, "is-alert");
+    if (st.last_error) err = '<div class="errline"><b>Reason</b> — ' + esc(st.last_error) + "</div>";
+  }
+
+  el.innerHTML =
+    '<div class="detail-head"><span class="detail-title">' + esc(title) + "</span>" +
+    '<span class="eyebrow">Step ' + Math.min(7, (STAGE_INDEX[s] ?? 0) + 1) + " of 7</span></div>" +
+    (note ? '<div class="detail-note">' + note + "</div>" : "") +
+    (facts ? '<div class="facts">' + facts + "</div>" : "") + err;
+}
+
+/* --- gap-first review panel (§13) --------------------------------------- */
+function renderGaps(gaps) {
+  const sig = JSON.stringify(gaps.map((g) => g.field_path));
+  $("gaps-block").hidden = gaps.length === 0;
+  if (sig === gapSig) return;
+  gapSig = sig;
+  for (const k of Object.keys(gapEdits)) {
+    if (!gaps.some((g) => g.field_path === k)) delete gapEdits[k];
+  }
+  $("gaps-title").textContent =
+    gaps.length === 1 ? "1 field needs you" : gaps.length + " fields need you";
+  $("gaps-list").innerHTML = gaps.map((g) => {
+    const docs = (g.documents_searched || [])
+      .map((d) => '<span class="chip">' + esc(DOC_LABEL[d] || d) + "</span>").join("");
+    return '<div class="gap">' +
+      '<div><span class="gap-label">' + esc(humanPath(g.field_path)) + "</span>" +
+      '<code class="gap-path">' + esc(g.field_path) + "</code></div>" +
+      '<div class="gap-reason">' + esc(g.reason) + "</div>" +
+      '<div class="gap-docs"><span class="eyebrow">Searched</span>' +
+      (docs || '<span class="chip">no documents</span>') + "</div>" +
+      '<input type="text" data-gap="' + esc(g.field_path) + '" class="is-empty" ' +
+      'autocomplete="off" placeholder="' + esc(humanPath(g.field_path)) +
+      '" value="' + esc(gapEdits[g.field_path] || "") + '">' +
+      "</div>";
+  }).join("");
+  for (const input of $("gaps-list").querySelectorAll("input[data-gap]")) {
+    input.addEventListener("input", () => {
+      gapEdits[input.dataset.gap] = input.value;
+      input.classList.toggle("is-empty", !input.value.trim());
+      syncApprove();
+    });
+  }
+}
+
+function fieldRows(obj, keys) {
+  return keys.map((k) => {
+    const v = fmtValue(obj ? obj[k] : null);
+    return "<tr><th>" + esc(humanLeaf(k)) + "</th>" +
+      (v === null ? '<td class="empty">not extracted</td>' : "<td>" + esc(v) + "</td>") +
+      "</tr>";
+  }).join("");
+}
+function renderVerified(app) {
+  const sig = JSON.stringify(app || null);
+  if (sig === appSig) return;
+  appSig = sig;
+  const n = countFilled(app);
+  $("verified-count").innerHTML = "<b>" + n + "</b> field" + (n === 1 ? "" : "s") +
+    " extracted &amp; verified";
+  if (!app) { $("verified-body").innerHTML = ""; return; }
+  let html = '<div class="grp"><h3>Business</h3><table class="fields">' +
+    fieldRows(app, ["legal_name", "dba", "entity_type", "formation_date",
+                    "formation_state", "tax_id", "industry_code",
+                    "registered_address", "business_address", "phone", "website"]) +
+    "</table></div>";
+  const owners = app.beneficial_owners || [];
+  html += '<div class="grp"><h3>Beneficial owners</h3>';
+  if (!owners.length) html += '<table class="fields"><tr><td class="empty">none extracted</td></tr></table>';
+  owners.forEach((o, i) => {
+    html += '<h3 style="margin-top:12px">Owner ' + (i + 1) + "</h3>" +
+      '<table class="fields">' +
+      fieldRows(o, ["full_name", "dob", "ownership_pct", "residential_address",
+                    "id_type", "id_number"]) + "</table>";
+  });
+  html += "</div>";
+  html += '<div class="grp"><h3>Control person</h3><table class="fields">' +
+    fieldRows(app.control_person, ["full_name", "title", "dob",
+                                   "residential_address", "id_type", "id_number",
+                                   "is_authorized_signatory"]) +
+    "</table></div>";
+  $("verified-body").innerHTML = html;
+}
+
+function syncApprove() {
+  const gaps = (last && last.gaps) || [];
+  const filled = gaps.every((g) => (gapEdits[g.field_path] || "").trim() !== "");
+  /* Belt and braces: §9.1's validator enforces both of these server-side. */
+  $("approve-btn").disabled = reviewBusy || !$("attested").checked || !filled;
+  $("approve-btn").title = !$("attested").checked
+    ? "Tick the attestation first"
+    : (!filled ? "Every outstanding field must be filled in" : "");
+}
+
+function renderReview(st) {
+  const open = st && st.stage === "awaiting_review";
+  $("review").hidden = !open;
+  if (!open) return;
+  renderGaps(st.gaps || []);
+  renderVerified(st.application || null);
+  const age = humanAge(st.pending_since);
+  $("review-age").textContent = age ? "waiting " + age : "waiting";
+  syncApprove();
+}
+
+/* --- controls ----------------------------------------------------------- */
+function setMsg(id, text, tone) {
+  const el = $(id);
+  el.textContent = text || "";
+  el.className = "msg" + (tone ? " " + tone : "");
+}
+
+async function postJSON(url, body) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body === undefined ? {} : body),
+  });
+  let data = null;
+  try { data = await r.json(); } catch (e) { data = null; }
+  return { status: r.status, data: data };
+}
+
+$("submit-btn").addEventListener("click", async () => {
+  $("submit-btn").disabled = true;
+  setMsg("submit-msg", "Filing…");
+  try {
+    const r = await postJSON("/applications", { client_key: CLIENT_KEY });
+    if (r.status === 409) {
+      /* §6.1: the duplicate is the point — one open onboarding per client. */
+      setMsg("submit-msg", (r.data && r.data.error) ||
+             "onboarding already in progress for " + CLIENT_KEY, "is-alert");
+    } else if (r.status === 202) {
+      setMsg("submit-msg", "Application filed — case " + WORKFLOW_ID + " is open.", "is-done");
+    } else {
+      setMsg("submit-msg", "Unexpected response (" + r.status + ")", "is-alert");
+    }
+  } catch (e) {
+    setMsg("submit-msg", "Gateway unreachable.", "is-alert");
+  }
+  $("submit-btn").disabled = false;
+  refresh();
+});
+
+$("assign-btn").addEventListener("click", async () => {
+  $("assign-btn").disabled = true;
+  setMsg("assign-msg", "Asking core banking to assign a client ID…");
+  try {
+    const r = await postJSON("/api/assign/" + CLIENT_KEY);
+    setMsg("assign-msg", r.status < 300
+      ? "Client ID returned to the workflow."
+      : "Core banking refused (" + r.status + ")", r.status < 300 ? "is-done" : "is-alert");
+  } catch (e) {
+    setMsg("assign-msg", "Gateway unreachable.", "is-alert");
+  }
+  refresh();
+});
+
+$("attested").addEventListener("change", syncApprove);
+
+$("approve-btn").addEventListener("click", async () => {
+  const gaps = (last && last.gaps) || [];
+  const field_edits = gaps.map((g) => ({
+    field_path: g.field_path, value: (gapEdits[g.field_path] || "").trim(),
+  }));
+  await sendReview({
+    decision: "approve", analyst_id: ANALYST_ID, note: null,
+    field_edits: field_edits, attested: true,
+  });
+});
+
+$("reject-btn").addEventListener("click", async () => {
+  /* §9.1 rule 6: a rejection without a reason is not a rejection. */
+  const note = window.prompt(
+    "Why is this file going back to the onboarding specialist?");
+  if (note === null) return;
+  if (!note.trim()) {
+    setMsg("review-msg", "A reason is required to reject.", "is-alert");
+    return;
+  }
+  await sendReview({
+    decision: "reject", analyst_id: ANALYST_ID, note: note.trim(),
+    field_edits: [], attested: false,
+  });
+});
+
+async function sendReview(submission) {
+  reviewBusy = true;
+  syncApprove();
+  $("reject-btn").disabled = true;
+  setMsg("review-msg", "Submitting…");
+  try {
+    const r = await postJSON("/api/review/" + CLIENT_KEY, submission);
+    if (r.status === 422) {
+      /* The update validator refused it before it entered history (§9.1). */
+      setMsg("review-msg", (r.data && r.data.error) || "Rejected by validation.", "is-alert");
+    } else if (r.status < 300) {
+      setMsg("review-msg", submission.decision === "approve"
+        ? "Approved — opening the account."
+        : "Sent back for another extraction attempt.", "is-done");
+      $("attested").checked = false;
+      gapEdits = {};
+      gapSig = "";
+    } else {
+      setMsg("review-msg", "Unexpected response (" + r.status + ")", "is-alert");
+    }
+  } catch (e) {
+    setMsg("review-msg", "Gateway unreachable.", "is-alert");
+  }
+  reviewBusy = false;
+  $("reject-btn").disabled = false;
+  syncApprove();
+  refresh();
+}
+
+/* --- demo toggles (§10.4) ----------------------------------------------- */
+async function sendControl(body, label) {
+  try {
+    const r = await postJSON("/api/control", body);
+    setMsg("control-msg", r.status < 300 ? label + " applied."
+      : label + " failed (" + r.status + ")", r.status < 300 ? "" : "is-alert");
+  } catch (e) {
+    setMsg("control-msg", "Gateway unreachable.", "is-alert");
+  }
+}
+$("slow-first-call").addEventListener("change", (e) => {
+  sendControl({ slow_first_call: e.target.checked },
+              e.target.checked ? "Slow first core call on" : "Slow first core call off");
+});
+$("llm-down").addEventListener("change", (e) => {
+  sendControl({ llm_down: e.target.checked },
+              e.target.checked ? "Model outage on" : "Model outage off");
+});
+
+/* --- render + poll ------------------------------------------------------ */
+function render(st) {
+  last = st;
+  const pill = $("stage-pill");
+  if (!st) {
+    pill.className = "pill is-idle";
+    pill.textContent = "Not started";
+  } else {
+    pill.className = "pill " + (STAGE_TONE[st.stage] || "is-running");
+    pill.textContent = STAGE_LABEL[st.stage] || st.stage;
+  }
+  renderStepper(st);
+  renderDetail(st);
+  renderReview(st);
+  $("assign-btn").disabled = !(st && st.stage === "awaiting_client_id");
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/status/" + CLIENT_KEY, { cache: "no-store" });
+    if (r.status === 404) {
+      /* Not an error: the workflow simply has not been started yet (§6.1). */
+      render(null);
+      $("poll-note").textContent = "Status refreshes every 2 seconds.";
+      return;
+    }
+    if (!r.ok) throw new Error("status " + r.status);
+    render(await r.json());
+    $("poll-note").textContent = "Status refreshes every 2 seconds · last update " +
+      new Date().toLocaleTimeString();
+  } catch (e) {
+    /* Keep the last good picture; say so quietly rather than flashing red. */
+    $("poll-note").textContent = "Gateway unreachable — showing the last known state.";
+  }
+}
+
+render(null);
+refresh();
+setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>
