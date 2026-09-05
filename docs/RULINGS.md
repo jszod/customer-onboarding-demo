@@ -402,6 +402,47 @@ the Fable/Mythos 5.1 family; on the spec's default `claude-sonnet-5` and on
 
 ---
 
+## R-011 — the console places all ten stages, and what it does not let the analyst edit
+
+**Task 8. `web/static/index.html`.**
+
+**The plan's stage→step map covered eight of §5.6's ten stages.**
+`manual_intervention` and `rejected_by_core` had no position, so the two
+terminal failure outcomes would have rendered as a blank stepper — in front of
+a customer, at the exact moment the demo is making its point about failure
+being a *process outcome*. **Ruling:** `manual_intervention`→step 2 (the
+extract/review loop that exhausted `MAX_ATTEMPTS`), `rejected_by_core`→step 3
+(open account), both drawn in a distinct **failed** treatment rather than
+done-or-current. §10.3 says every failure path ends in a business status; the
+console now shows that as a finished process with a bad outcome, not a crash.
+Verified here: all ten `OnboardingStatus.stage` values appear in the page.
+
+**A network failure is not a 404.** A fetch exception keeps the last good
+render behind a quiet footnote ("Gateway unreachable — showing the last known
+state"); only a real 404 renders the neutral pre-submit idle state. Clearing
+the screen because one poll failed would look, on stage, exactly like the
+workflow dying.
+
+**Open question deliberately left for Task 15 — the field table is read-only.**
+§9.1 says the analyst can edit field values; the plan scopes the console's
+inputs to `gaps[]` only. The implementer kept the plan's narrower scope: gap
+inputs are editable, the "N fields extracted & verified" table renders
+read-only. **This is a real narrowing of §9.1 and should be decided
+deliberately, not inherited.** Widening it changes what lands in
+`field_edits`, which Task 15's validator owns — so Task 15 is the right place
+to settle it. `gaps.apply_edits` already handles an edit to any path, including
+an optional field (§19.3), so the machinery is not the obstacle.
+
+Labels follow §3's personas rather than the plan's terse verbs — "Approve &
+open the account", "Reject — send back…" — since two different people operate
+this and the plan's own tests only require the substrings.
+
+The one external URL in the page is an `<a>` to the local Temporal UI, which
+§12 wants reachable. No external scripts or stylesheets: the page is
+self-contained, as §13 requires.
+
+---
+
 ## Closed — `make verify`'s false green between Tasks 1 and 3
 
 Recorded in Task 1: `make verify` printed "VERIFY OK: 22/22 scenarios
