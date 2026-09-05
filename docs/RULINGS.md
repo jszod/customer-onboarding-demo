@@ -351,6 +351,57 @@ convention.
 
 ---
 
+## R-010 — `call_llm`: the SDK's real HTTP types, and the outage flag closed
+
+**Task 10. `python/activities/llm.py`, `python/prompts.py`.**
+
+**Error fixtures are built from `httpx2`, not `httpx`.** The installed SDK is
+`anthropic` 1.4.0, which is built on httpx2 — `APIStatusError.__init__` is
+typed `response: httpx2.Response`. Constructing the 401/429/5xx fixtures from
+the `httpx` package would hand the activity a *different type* than production
+does, so the classification tests would be exercising a path the demo never
+takes. Verified here: `anthropic.__version__ == "1.4.0"` and `httpx2` is
+present. `pyproject.toml` pins `anthropic>=0.40`, which resolved to 1.x;
+`uv.lock` holds it steady.
+
+**The §10.4 outage toggle is now closed end to end**, discharging the
+obligation R-007 carried forward. The gateway writes and the activity reads
+`config.settings().document_store.parent / ".llm_down"`, and
+`test_the_outage_flag_path_matches_the_one_the_gateway_writes` imports *both*
+modules and asserts the two resolve equal — so the halves cannot drift apart
+silently, which was the whole risk. The raised failure is retryable on purpose:
+the beat is the loop retrying and then resuming when the flag clears.
+
+**Malformed tool input is a classified retryable failure.** The plan called
+`model_cls.model_validate(...)` bare, so a schema-invalid payload would escape
+as a raw `pydantic.ValidationError` — an unclassified error, where §8.3
+requires malformed model output to be a retryable activity failure. Also
+`{**block.input, "kind": block.name}` rather than the plan's key order, so a
+model that emits its own `kind` cannot override the discriminator the workflow
+dispatches on.
+
+**A 429 whose `retry-after` will not parse falls back to 30s** instead of
+raising. The header may be an HTTP-date; a `ValueError` raised inside the
+except block would have replaced a correctly-classified retryable failure with
+an unclassified one — the failure mode being handled, reintroduced by the
+handler.
+
+**The three manifest helpers pin the outage flag off.** With the default
+`DOCUMENT_STORE=./.store`, `.llm_down` resolves into the repo root — ambient
+demo state. Running `make demo` with the toggle on would otherwise make
+`T-ACT-02` fail for a reason unrelated to error classification.
+
+**Note for Task 13:** `_client()` is `lru_cache`d, so `MODEL` and key changes
+need a worker restart — which is precisely why the outage toggle is a flag file
+rather than an env var.
+
+**Model-family caveat, out of scope but worth knowing:** the call uses
+`tool_choice={"type": "any"}` per the plan. Forced tool use is unavailable on
+the Fable/Mythos 5.1 family; on the spec's default `claude-sonnet-5` and on
+`claude-opus-5` it is fine. Pointing `MODEL` at a Fable-family model would 400.
+
+---
+
 ## Closed — `make verify`'s false green between Tasks 1 and 3
 
 Recorded in Task 1: `make verify` printed "VERIFY OK: 22/22 scenarios

@@ -21,9 +21,14 @@ def test_T_ACT_01_ingest_copies_and_hashes_documents():
     assert_missing_file_is_non_retryable()
 
 
-@pytest.mark.skip(reason=SKIP)
 def test_T_ACT_02_call_llm_classifies_errors():
     """401 non-retryable, 429 sets next_retry_delay, 5xx retryable."""
+    from tests.test_activity_llm import (assert_401_non_retryable,
+                                         assert_429_sets_retry_delay,
+                                         assert_5xx_retryable)
+    assert_401_non_retryable()
+    assert_429_sets_retry_delay()
+    assert_5xx_retryable()
 
 
 def test_T_ACT_03_open_account_is_idempotent():
