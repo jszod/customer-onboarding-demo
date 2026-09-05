@@ -191,6 +191,94 @@ one test — and accept that per-attempt reminders stop appearing in the log.
 
 ---
 
+## R-006 — the ledger enforces exactly-one-account in the storage engine
+
+**Task 6. `core_banking/ledger.py`, `core_banking/app.py`.**
+
+**The plan's own docstring broke the plan's own test.** Step 1's test asserts
+the literal substring `"temporalio"` is absent from the package source; Step 4's
+module docstring says *"It NEVER imports temporalio"*. As written Task 6 could
+not pass. **Ruling:** keep the assertion (it is the honest check for a real
+import) and reword the docstrings to "the Temporal SDK". A second test was
+added that AST-parses every module and rejects any import rooted at
+`temporalio` *or* `python` — which also catches an indirect route in through
+the worker's models. Verified here: zero matches for either.
+
+**`create()` had a duplicate-request race, in exactly the scenario the demo is
+about.** The plan's `open_account` did `find()` then `create()`. FastAPI runs
+sync handlers in a threadpool, so two concurrent retries could both see `None`,
+both INSERT, and the second raise `IntegrityError` — a 500 at the moment the
+demo is meant to show a clean `duplicate`. **Ruling:** replace with
+`create_or_get()`, a single `INSERT OR IGNORE` guarded by the PRIMARY KEY,
+deriving accepted-versus-duplicate from `cur.rowcount`. Exactly-one-account is
+now enforced by the storage engine rather than by application logic a retry can
+race past.
+
+Probed in the parent session rather than taken on trust: eight threads
+released from a barrier onto the same idempotency key produced one
+`created=True`, one distinct `request_id`, one ledger row, and no errors.
+
+**`assigned_at` was reporting account-creation time.** The plan sent
+`row["created_at"]` as the callback's `assigned_at`, but §5.5 means when the
+*client ID* was assigned — after an ambiguous timeout those differ by however
+long the operator waits, and the demo deliberately makes that gap visible.
+**Ruling:** a separate `assigned_at` column set by `assign_client_id`, emitted
+as ISO-8601 with a `Z` so it does not deserialize into a naive datetime on the
+gateway side. Re-assignment stays idempotent via `WHERE client_id IS NULL`.
+
+`application` deliberately stays an opaque `dict` rather than
+`ApplicationFields`. Importing `python/models` here would couple the system
+this service impersonates — bought in 1998 — to the onboarding platform's
+Pydantic models, and undercut the independence the whole beat rests on. The
+body stays wire-compatible with `OpenAccountRequest`.
+
+---
+
+## R-007 — two gateway errors that would have passed tests and failed on stage
+
+**Task 7. `web/gateway.py`.**
+
+**The 409 must also catch `WorkflowAlreadyStartedError`.** The plan catches
+`RPCError` with `ALREADY_EXISTS`. Confirmed against the installed SDK source:
+the client converts that gRPC status into the *typed*
+`WorkflowAlreadyStartedError` whenever the details unpack, which is the normal
+case against a real server. So the plan's handler would have caught nothing,
+and §4.1's headline property — "onboarding already in progress for acme-corp" —
+would have surfaced as a 500 during the demo while the unit test, which raises
+the untyped error, went on passing. **Ruling:** catch both paths, and pin the
+typed one with its own test.
+
+**The 422 must unwrap `WorkflowUpdateFailedError.cause`.** §6.1 requires "422
+with the validator's rejection message." The real client wraps a validator
+rejection in `WorkflowUpdateFailedError`, whose own `str()` is the literal
+string `"Workflow update failed"` — so the analyst would have been told nothing
+about why their approval was refused. **Ruling:** catch the wrapper first and
+return `str(e.cause)`, keeping the plan's `ApplicationError` branch for the
+direct case.
+
+Both are the same class of defect and worth naming as a pattern: **a test
+written against a hand-made fake can pass while the real client takes a
+different path.** These two were caught only by reading the SDK rather than the
+plan. Tasks 8 and 14–17 should assume more of these exist.
+
+**The LLM-outage toggle writes a flag file, not `app.state`.** The plan's Step 3
+set `app.state.llm_down`, which the worker — a separate process — can never
+see. This matches the plan's own gap-closure note (line 5290) that
+`live_call_llm` reads a flag at `<DOCUMENT_STORE>/../.llm_down`. **Carried
+obligation: Task 10 owns the reader half** and must check
+`settings().document_store.parent / ".llm_down"`.
+
+**`GET /api/status/{client_key}` returns 404 before the workflow exists.** Task
+8's console polls every 2s "tolerating 404 before the workflow exists," but the
+plan's endpoint had no not-found branch — a pre-submit poll would have been a
+500 every two seconds behind the demo.
+
+`/api/control` and `/api/assign` use `httpx.AsyncClient` rather than blocking
+`httpx.post` inside `async def`, which would stall the event loop for up to 30
+seconds during the core-banking beat and freeze the console's polling.
+
+---
+
 ## Closed — `make verify`'s false green between Tasks 1 and 3
 
 Recorded in Task 1: `make verify` printed "VERIFY OK: 22/22 scenarios
