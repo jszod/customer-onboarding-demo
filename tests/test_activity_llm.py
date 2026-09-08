@@ -441,17 +441,43 @@ def test_fixture_mode_returns_the_recorded_sequence(tmp_path, monkeypatch):
     assert out.action.doc_ids == ["ein-letter"]
 
 
-def test_fixture_mode_advances_with_the_turn_count(tmp_path, monkeypatch):
-    monkeypatch.setenv("FIXTURE_DIR", str(tmp_path))
-    (tmp_path / "acme-corp.json").write_text(json.dumps([
+def _two_response_recording() -> str:
+    return json.dumps([
         {"action": {"kind": "request_documents", "doc_ids": ["ein-letter"],
                     "rationale": "first"},
          "turn": {"role": "assistant", "content": "first"}, "usage": {}},
         {"action": {"kind": "escalate", "gaps": []},
-         "turn": {"role": "assistant", "content": "second"}, "usage": {}}]))
-    req = _request(turns=[AgentTurn(role="assistant", content="first")])
+         "turn": {"role": "assistant", "content": "second"}, "usage": {}}])
+
+
+def test_fixture_mode_advances_with_the_call_count(tmp_path, monkeypatch):
+    """The transcript the real loop produces, not a hand-tidied one: a
+    `request_documents` turn is followed by its tool result, so the second call
+    arrives with TWO turns and must still get the second recorded response.
+
+    This test used to pass a single assistant turn — a shape
+    `ExtractionAgentWorkflow` never produces — and the implementation agreed
+    with it, so both were green while the first real run died on turn 2 as
+    `FixturesExhausted` (R-026)."""
+    monkeypatch.setenv("FIXTURE_DIR", str(tmp_path))
+    (tmp_path / "acme-corp.json").write_text(_two_response_recording())
+    req = _request(turns=[AgentTurn(role="assistant", content="first"),
+                          AgentTurn(role="tool", content="now readable: ein-letter")])
     out = _run(llm.fixture_call_llm, req)
     assert isinstance(out.action, Escalation)
+
+
+def test_a_tool_result_does_not_consume_a_recorded_response(tmp_path, monkeypatch):
+    """The other half of the same rule, stated from the recording's side: two
+    responses cover two model calls however many tool turns sit between
+    them."""
+    monkeypatch.setenv("FIXTURE_DIR", str(tmp_path))
+    (tmp_path / "acme-corp.json").write_text(_two_response_recording())
+    turns = [AgentTurn(role="assistant", content="first")]
+    for extra in ("one", "two", "three"):
+        turns.append(AgentTurn(role="tool", content=extra))
+        out = _run(llm.fixture_call_llm, _request(turns=list(turns)))
+        assert isinstance(out.action, Escalation)
 
 
 def test_fixture_mode_makes_no_api_call(tmp_path, monkeypatch):

@@ -13,9 +13,9 @@ which for the workflow scenarios means booting a second `WorkflowEnvironment`
 per scenario for no added coverage. Ordinary tests in those modules keep the
 `test_` prefix; only the manifest's own scenarios delegate this way.
 """
-import pytest
-
-SKIP = "not implemented — see the owning task in the plan"
+# All twenty-two are implemented: there is no `SKIP` reason left to import
+# `pytest` for. Adding a scenario means adding a row, a stub and a ruling --
+# and bringing both back.
 
 
 # --- §16.1 activity unit tests (Tasks 9, 10, 11) ---
@@ -180,21 +180,37 @@ def test_T_CHILD_03_iteration_cap_escalates_without_raising():
 
 # --- §16.5 replay tests (Task 20) ---
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_REPLAY_01_happy_path_history_replays():
-    """histories/happy-path.json replays against current workflow code."""
+async def test_T_REPLAY_01_happy_path_history_replays():
+    """histories/happy-path.json replays against current workflow code.
+
+    Delegates to tests/test_replay.py::assert_happy_path_replays.
+    """
+    from tests.test_replay import assert_happy_path_replays
+    await assert_happy_path_replays()
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_REPLAY_02_reject_loop_history_replays():
-    """histories/reject-loop.json replays."""
+async def test_T_REPLAY_02_reject_loop_history_replays():
+    """histories/reject-loop.json replays.
+
+    Delegates to tests/test_replay.py::assert_reject_loop_replays.
+    """
+    from tests.test_replay import assert_reject_loop_replays
+    await assert_reject_loop_replays()
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_REPLAY_03_timeout_retry_history_replays():
-    """histories/timeout-retry.json replays."""
+async def test_T_REPLAY_03_timeout_retry_history_replays():
+    """histories/timeout-retry.json replays.
+
+    Delegates to tests/test_replay.py::assert_timeout_retry_replays.
+    """
+    from tests.test_replay import assert_timeout_retry_replays
+    await assert_timeout_retry_replays()
 
 
-@pytest.mark.skip(reason=SKIP)
-def test_T_REPLAY_04_escalation_history_replays():
-    """histories/escalation.json replays."""
+async def test_T_REPLAY_04_escalation_history_replays():
+    """histories/escalation.json replays.
+
+    Delegates to tests/test_replay.py::assert_escalation_replays.
+    """
+    from tests.test_replay import assert_escalation_replays
+    await assert_escalation_replays()

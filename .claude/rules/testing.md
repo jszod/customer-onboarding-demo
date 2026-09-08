@@ -95,6 +95,21 @@ takes a fresh uuid4 task queue and every workflow id carries a uuid4, so two
 tests cannot see each other's workflows. A test that pins a fixed workflow id
 or task queue breaks that — check before adding one.
 
+## Fixture mode is a contract too, and it has its own unit
+
+One recorded response is one model **call**, and a call adds one *assistant*
+turn — never the whole transcript, which also carries tool turns. Indexing the
+recording by `len(turns)` skips a response per tool result and dies as
+`FixturesExhausted` on the second call of every real run, while every
+hand-built unit test passes (R-026).
+
+The general form: a fixture-backed activity and the recorder that wrote the
+fixture must agree about the unit, and only running the real loop over the real
+recording proves they do.
+`test_the_committed_fixture_drives_the_real_loop` is that test — the child
+workflow, `fixture_call_llm`, and `fixtures/acme-corp.json`, with nothing
+stubbed. Keep one like it for any loop that fixtures drive.
+
 ## Histories are captured, never authored
 
 `make histories` drives a live stack and downloads the real histories. Do not
@@ -104,7 +119,21 @@ workflow code that breaks determinism — and a hand-authored history guards
 nothing.
 
 Capture the child workflow's history too. A determinism break there is just as
-fatal and just as easy to introduce.
+fatal and just as easy to introduce — and capture it by **run id**, read out of
+the parent's `ChildWorkflowExecutionStarted`. Child ids are derived from the
+parent id (§7), so fetching `onboarding-acme-corp-extract-2` by id alone can
+hand you a dead run from an earlier capture and file it under this scenario's
+name (R-027).
+
+**`WorkflowHistory.from_json`'s first argument is the workflow id**, not a
+label. The parent builds its child's id from `workflow.info().workflow_id`, so
+replaying under an invented id fails as a child-id mismatch — reported as
+nondeterminism in code nobody touched, which is the worst false positive this
+gate can produce. Read the id out of the started event.
+
+A red replay test is a claim about the code, not about the file. Re-capturing
+to make it green is how the gate stops guarding: read the failure first, and
+re-capture only once you know the command sequence changed on purpose.
 
 ## `make test` needs no API key
 

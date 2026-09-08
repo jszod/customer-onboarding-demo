@@ -1244,3 +1244,186 @@ the boundary.
 `payloads-and-activities.md`, on the *"it will bite a task you can name"*
 clause: Task 20 replays this loop, and every future tool has to record its
 result or reintroduce the same 400.
+
+## R-025 — `make up` started nothing, and said it had
+
+**Task 20.** The first task that needs a live stack, and the stack would not
+start. `make up` printed all three URLs and `make status` then reported four
+stopped processes.
+
+**The problem.** R-001 fixed half of this and the other half survived, because
+only the half `make status` exercised was ever run. `pgrep -f` matches whole
+command lines, and the start recipes contain BOTH the guard pattern and the
+command they start:
+
+```make
+@pgrep -f "[t]emporal server start-dev" >/dev/null 2>&1 || \
+	(nohup temporal server start-dev --ui-port 8233 > ... &)
+```
+
+R-001's bracket idiom stops the *pattern* from matching itself. It does nothing
+about the second occurrence: `nohup temporal server start-dev` is in the same
+recipe, so it is in the same command line, and the regex `[t]emporal server
+start-dev` matches it. The guard finds the recipe's own shell, concludes the
+process is already running, and the `||` branch never fires. Reproduced
+directly:
+
+```
+$ sh -c 'pgrep -af "[t]emporal server start-dev" || echo NOMATCH; true "nohup temporal server start-dev"'
+2852 sh -c pgrep -af "[t]emporal server start-dev" || echo NOMATCH; true "nohup temporal server start-dev"
+```
+
+All four processes had it — `[c]ore_banking.app:app` against `uvicorn
+core_banking.app:app`, `[w]eb.gateway:app` against `uvicorn web.gateway:app`,
+`[p]ython.worker` against `python -m python.worker`. `make demo` was therefore
+inert, on stage as much as here. `down`, `kill-worker` and `status` were never
+affected: their recipes carry the bracketed pattern and nothing else.
+
+**The ruling.** No regex fixes this — any pattern that matches the real
+process's command line also matches the recipe text that starts it, and Make
+expands its variables before the shell ever runs, so the literal is always
+there. The command has to stop being part of a command line, so it moves into a
+file: `make/start.sh <name>`, one `case` arm per process, invoked by each of
+the four targets. That process shows up as `sh make/start.sh temporal`, which
+no guard pattern matches, and the guard inside the script sees only real
+processes.
+
+**Authority.** Spec §14 mandates "`pgrep` guards so targets are idempotent" —
+the mechanism, not its location. The guards are still pgrep guards and the
+targets are still idempotent; they now also work.
+
+**The cost.** One more file, and `make up` no longer reads as a self-contained
+description of what it starts. Worth it: the alternative is a demo entry point
+that lies, which is what §10.4's worker-kill beat runs through.
+
+## Promoted to rules
+
+**A `pgrep` guard must not share a command line with the command it guards** —
+new file `.claude/rules/stack-and-make.md`, scoped to `Makefile`, `make/**` and
+`python/Makefile`. This is the rule of two, clause 1: R-001 and R-025 are the
+same fault, eight tasks apart, and the second one hid because the first one's
+verification (`make status`) could not reach it. The rule carries the check
+that would have caught both — start it, then ask the system, not the recipe.
+
+## R-026 — the fixture recording is indexed by model calls, not by turns
+
+**Task 20.** With the stack finally up, all three onboarding attempts failed
+inside a second:
+
+    FixturesExhausted: fixtures/acme-corp.json records 2 responses but the
+    agent is on turn 3
+
+**The problem.** `fixture_call_llm` selected its response with
+`sequence[len(req.turns)]`. One recorded response is one model CALL, and a call
+contributes exactly one *assistant* turn — but the transcript also carries tool
+turns. R-024 made `request_documents` record its result on every path, so
+iteration 1 leaves two turns behind, and iteration 2 asks for `sequence[2]` of
+a two-response recording. The committed fixture is exactly that shape
+(`request_documents`, then `submit_extraction`), so **every** fixture-mode run
+died on its second call, three attempts deep, and the parent completed as
+`manual_intervention` — a business status, correctly, which is why nothing
+crashed and nothing looked obviously wrong.
+
+**The ruling.** Count the calls, not the turns:
+
+```python
+call = sum(1 for turn in req.turns if turn.role == "assistant")
+```
+
+Fixed in the activity rather than by padding the recording: the recorder writes
+one entry per call, which is the honest unit, and a fixture edited to line up
+with a wrong index is the exact failure §16.7 exists to prevent.
+
+**Why the suite was green.** `test_fixture_mode_advances_with_the_turn_count`
+hand-built a transcript of one assistant turn — a shape
+`ExtractionAgentWorkflow` never produces after a `request_documents` — and the
+implementation agreed with it. The test and the code shared one wrong
+assumption about what a turn is, so they confirmed each other. Third occurrence
+of R-024's family, and the same shape: everything that touched the loop was a
+stub, and the one thing that would have caught it was running the real loop
+against the real recording.
+
+**The cost.** Three tests. Two on the activity — the real two-turn shape, and a
+tool result not consuming a response — and one that is the general remedy:
+`test_the_committed_fixture_drives_the_real_loop` runs the actual child
+workflow with the actual `fixture_call_llm` over `fixtures/acme-corp.json` and
+asserts two iterations ending in §8.4's gap. All three fail against the old
+index; the third is the one that would have found it unprompted.
+
+## R-027 — four defects in the plan's Task 20 code
+
+**Task 20.** The plan supplies `tools/capture_histories.py` and
+`tests/test_replay.py` in full. Four things in them do not survive contact with
+this repository, and three of the four present as something other than
+themselves.
+
+**1. The replayer was handed a random workflow id.** The plan calls
+`WorkflowHistory.from_json(str(uuid.uuid4()), ...)`. That first argument is the
+**workflow id**, not a label, and the parent derives its child's id from
+`workflow.info().workflow_id` (§7). Replaying under an invented id therefore
+fails with:
+
+    Nondeterminism error: Child workflow id of scheduled event
+    'onboarding-acme-corp-extract-1' does not match child workflow id of
+    command '5235fd34-…-extract-1'
+
+— a determinism failure in code nobody had touched, which is the worst possible
+false positive for this particular gate. The started event carries the real id;
+`_workflow_id()` reads it out of the history rather than deriving it from the
+file name, which would drift.
+
+**2. `_save` fetched child histories by id, and ids outlive runs.** Child ids
+are derived from the parent id, so `onboarding-acme-corp-extract-2` exists as
+soon as *any* earlier run reached attempt 2. The first capture attempt failed
+three attempts deep (R-026), and the next capture dutifully filed those dead
+children under `happy-path-extract-2.json` and `-3` — a happy path that
+records two extra extraction attempts it never made, committed as a
+determinism gate. `_save` now reads `ChildWorkflowExecutionStarted` out of the
+parent's own history and fetches each child by (id, **run id**).
+
+**3. `_wait` matched the stage it was trying to leave.** The plan polls for a
+stage name. After a rejection the workflow is still `awaiting_review` on
+attempt 1 until it re-ingests, so the reject-loop scenario's second wait
+returned immediately and submitted the approval into attempt 1's already-closed
+review. `_wait` now takes a predicate, and that scenario waits for
+`awaiting_review AND attempt == 2`.
+
+**4. The manifest wrappers spun their own event loop.** The plan's stubs call
+`asyncio.new_event_loop().run_until_complete(...)` inside a sync test. Every
+other async scenario in `test_manifest.py` is an `async def` delegating to an
+`assert_*` helper, and pytest-asyncio is in auto mode. Followed the file's own
+convention.
+
+Also: the tool now `sys.path.insert`s the repo root (`testing.md`'s rule for
+`tools/`, which the plan's version would have tripped on immediately), and
+`_reset` terminates a leftover open run — the escalation scenario deliberately
+leaves one, so without that a second `make histories` wedges on the 409 the
+workflow id exists to produce.
+
+**No promotion.** Defects 1 and 2 are specific to replay capture and are
+recorded in `histories/README.md`, next to the files they explain. Defect 3 is
+already covered by the "hanging test is a retry loop" habit — read the state,
+do not assume the transition. Defect 4 is a convention the file states itself.
+
+## R-028 — 23 setup errors that were the demo stack, not the suite
+
+**Task 20, verification.** `make verify` came back with `184 passed, 23
+errors`, every error at fixture *setup*:
+
+    RuntimeError: Failed starting Temporal dev server: Failed connecting to
+    test server after 5 seconds … ConnectionRefused
+
+**The cause.** The demo stack was still up from the capture — dev server,
+worker, gateway, core banking — and the suite starts a dev server of its own
+with a five-second connect budget. Under that much company it lost the race.
+The identical command passed with `make down` first: **207 passed, 0 skipped**.
+
+R-019 chased this same message to a different cause (one server per *test*,
+racing its own ports) and fixed it by making the `env` fixture session-scoped.
+That fix stands; this is a second way to spend the same five seconds, and the
+suite cannot do anything about it because the contention is outside it.
+
+**The ruling.** No code change. `make down` before `make verify`, recorded in
+`.claude/rules/stack-and-make.md` alongside R-025, because the failure looks
+like a broken fixture and is not one — and an agent that reads it as a fixture
+bug will "fix" a fixture that was right.

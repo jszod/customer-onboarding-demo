@@ -209,12 +209,21 @@ async def fixture_call_llm(req: LLMRequest) -> LLMResponse:
         raise ApplicationError(
             f"{path} records no responses; re-run `make fixtures` (§16.7)",
             type="FixturesMissing", non_retryable=True)
-    if len(req.turns) >= len(sequence):
+    # ONE recorded response per model CALL, and each call contributes exactly
+    # one assistant turn to the transcript. Counting the whole transcript
+    # instead skips a response for every tool result: `request_documents`
+    # appends the assistant turn AND its tool turn, so the second call would
+    # ask for sequence[2] of a two-response recording and die as exhausted.
+    # Invisible to every fixture unit test, which hand-build transcripts that
+    # happen to hold assistant turns only -- and to the recorder, which never
+    # reads its own output. R-026, and the same family as R-024.
+    call = sum(1 for turn in req.turns if turn.role == "assistant")
+    if call >= len(sequence):
         # Past the end of the recording. Repeating the last turn forever is
         # how a fixture set that is one response short presents as the agent
         # looping to its iteration cap for no visible reason.
         raise ApplicationError(
             f"{path} records {len(sequence)} responses but the agent is on "
-            f"turn {len(req.turns) + 1}; re-record it (§16.7)",
+            f"call {call + 1}; re-record it (§16.7)",
             type="FixturesExhausted", non_retryable=True)
-    return LLMResponse.model_validate(sequence[len(req.turns)])
+    return LLMResponse.model_validate(sequence[call])

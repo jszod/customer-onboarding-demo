@@ -6,12 +6,14 @@ test itself. Fixtures are for `call_llm`'s own behaviour, not for this.
 """
 import asyncio
 import uuid
+from pathlib import Path
 
 from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from python import config
+from python.activities.llm import fixture_call_llm
 from python.models.application import ApplicationFields
 from python.models.documents import DocumentManifest, DocumentRef
 from python.models.extraction import (AgentTurn, DocumentRequest, Escalation,
@@ -224,3 +226,34 @@ def test_child_has_exactly_one_activity():
     """§8.1 — every tool is inline; only call_llm is an activity."""
     source = open("python/workflows/extraction.py").read()
     assert source.count("execute_activity") == 1
+
+
+async def test_the_committed_fixture_drives_the_real_loop(env, monkeypatch):
+    """The one test in this file that is not scripted: the REAL child workflow,
+    the REAL `fixture_call_llm`, and the committed recording.
+
+    Every other test here stubs the activity, which proves the loop branches
+    correctly and is blind to whether the recording and the activity agree
+    about what a "turn" is. They did not (R-026): a `request_documents` turn is
+    followed by its tool result, the activity indexed the recording by the
+    whole transcript, and the second call asked for a response one past the
+    end. Green suite, and the first live run died three attempts deep in
+    `FixturesExhausted`.
+
+    Two iterations, ending in §8.4's deliberate gap -- which is the escalation
+    beat the demo is built around, so this also pins the fixture to the story.
+    """
+    monkeypatch.setenv("FIXTURE_DIR",
+                       str(Path(__file__).resolve().parent.parent / "fixtures"))
+    queue = str(uuid.uuid4())
+    async with Worker(env.client, task_queue=queue,
+                      workflows=[ExtractionAgentWorkflow],
+                      activities=[fixture_call_llm]):
+        result = await env.client.execute_workflow(
+            "ExtractionAgentWorkflow", _request(), result_type=ExtractionResult,
+            id=f"extract-{uuid.uuid4()}", task_queue=queue)
+
+    assert result.iterations == 2, "one request_documents, then the submission"
+    assert result.escalated is True
+    assert [g.field_path for g in result.gaps] == ["beneficial_owners[1].dob"]
+    assert result.application.legal_name == "Acme Holdings LLC"

@@ -6,15 +6,27 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–19 have landed. Task 20 is next.** Skeleton and config, models
-and `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
-documents, core banking, the gateway, the console, all four activities, the
-extraction child, and the parent's loop and happy path.
+**Plan Tasks 1–20 have landed. Task 21 is next — the last one.** Skeleton and
+config, models and `CONTRACT.md`, the 22-scenario manifest, the design
+artifact, sample documents, core banking, the gateway, the console, all four
+activities, the extraction child, the parent's loop and happy path, the
+recorded fixtures, and the committed histories with their replay gate.
 
-Suite: **199 passed, 4 skipped.** The 4 remaining skips are the T-REPLAY
-scenarios, which Task 20 owns — every other manifest scenario is live. That
-count is the progress bar, and `make verify` is correctly red until it reaches
-zero.
+Suite: **207 passed, 0 skipped — `make verify` says `VERIFY OK: 22/22`.** The
+manifest is complete, so the progress bar is spent: from here a skip is a
+regression, not remaining work.
+
+**Task 20 was the first task to run the live stack, and it found three
+things.** `make up` had never started anything (R-025 — the guard matched its
+own recipe), fixture mode died on the second model call of every real run
+(R-026), and four defects in the plan's own Task 20 code (R-027). Read those
+three before touching `make/`, `fixture_call_llm`, or the capture tool.
+
+**The replay gate is now the sharpest thing in the suite.** `histories/` holds
+nine captured histories and `tests/test_replay.py` replays every one. A red
+replay test is a claim about the *code* — re-capturing to make it green is how
+the gate stops guarding. Both gates have been watched failing: the grep guard
+on an inserted `random()`, and the replayer on an extra timer it cannot see.
 
 `fixtures/acme-corp.json` is recorded and committed, so the suite is keyless.
 Two iterations: `request_documents`, then `submit_extraction` reporting
@@ -29,11 +41,13 @@ model), and the terminal tools declared `{"type": "object"}` for their
 payloads, which retries forever rather than failing. Both rules are now
 promoted into `.claude/rules/`.
 
-**Tasks 19–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
+**The suite needs a Temporal server** (`WorkflowEnvironment.start_local`). The
 SDK downloads its own server binaries from `temporal.download` at runtime — the
 only download host compiled into the Rust bridge — so that host must be
 reachable, or the work must run somewhere it already is. The Temporal CLI is a
-separate prerequisite for `make demo`; see the README's Setup section.
+separate prerequisite for `make demo` and `make histories`; see the README's
+Setup section. Same host, so a container that can run the suite can be given
+the CLI too.
 
 | Document | What it is |
 |----------|------------|
