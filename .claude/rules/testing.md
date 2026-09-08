@@ -73,15 +73,27 @@ So when you change console behaviour, check the behaviour:
   touching `pyproject.toml`. Stub the gateway's routes, drive the control, and
   assert on the intercepted request body.
 
-R-018 did exactly this for the editable field table, and the check is what
+R-022 did exactly this for the editable field table, and the check is what
 turned "the substring is present" into "the analyst's correction reaches
 `field_edits`".
 
 ## Test environments
 
 Use `WorkflowEnvironment.start_local()` for most tests; it is shareable via a
-pytest fixture. Use `start_time_skipping()` **only** for the SLA-timer tests —
-time-skipping environments cannot be shared between tests.
+pytest fixture, and `env` **is** session-scoped — one dev server per run. Use
+`start_time_skipping()` **only** for the SLA-timer tests, and leave `skip_env`
+function-scoped: time-skipping environments cannot be shared between tests.
+
+`tests/test_fixture_scopes.py` pins both scopes. They are not stylistic: one
+server per *test* raced its own ports (three sightings of an intermittent
+`Failed connecting to test server` fixture error), and one time-skipping
+environment shared between tests would let a test that advances the clock a
+year decide what "now" means for every test after it.
+
+**A shared server is only safe while nothing shares names.** `run_worker`
+takes a fresh uuid4 task queue and every workflow id carries a uuid4, so two
+tests cannot see each other's workflows. A test that pins a fixed workflow id
+or task queue breaks that — check before adding one.
 
 ## Histories are captured, never authored
 
@@ -118,4 +130,4 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 ```
 
 `record_fixtures.py` shipped without it and would have failed on the one step a
-human has to run themselves (R-019).
+human has to run themselves (R-023).

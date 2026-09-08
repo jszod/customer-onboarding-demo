@@ -58,6 +58,11 @@ class ExtractionSubmission(BaseModel):
 class Escalation(BaseModel):
     kind: Literal["escalate"] = "escalate"
     gaps: list[FieldGap] = []
+    # Everything the agent DID extract before it gave up. Optional so an
+    # older recorded response still validates, but the prompt asks for it on
+    # every escalation: without it the analyst opens a blank application and
+    # has to retype fields the agent had already read (§9.1).
+    application: ApplicationFields | None = None
 
 
 AgentAction = Annotated[DocumentRequest | ExtractionSubmission | Escalation,

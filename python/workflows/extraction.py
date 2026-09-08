@@ -20,8 +20,8 @@ with workflow.unsafe.imports_passed_through():
     from python.models.application import ApplicationFields
     from python.models.extraction import (AgentTurn, DocumentRequest, Escalation,
                                           ExtractionRequest, ExtractionResult,
-                                          ExtractionSubmission, LLMRequest,
-                                          LLMResponse)
+                                          ExtractionSubmission, FieldGap,
+                                          LLMRequest, LLMResponse)
 
     # Read ONCE, here, not inside run(). `settings()` reads os.environ, which
     # the workflow sandbox forbids at execution time -- and rightly so: a
@@ -87,11 +87,24 @@ class ExtractionAgentWorkflow:
 
             # --- inline tool: escalate (terminal)
             if isinstance(action, Escalation):
-                return ExtractionResult(application=ApplicationFields(),
-                                        gaps=action.gaps, iterations=iteration,
-                                        escalated=True)
+                # Carry the partial application through. Escalation is the
+                # demo's headline beat and it lands on the review console:
+                # returning an empty ApplicationFields here would hand the
+                # analyst a blank form and drop every field the agent read,
+                # including the list members their gap edits address (§9.1).
+                return ExtractionResult(
+                    application=action.application or ApplicationFields(),
+                    gaps=action.gaps, iterations=iteration, escalated=True)
 
         # Cap reached without a terminal tool. Escalate; never raise (§8.1).
-        return ExtractionResult(application=ApplicationFields(),
-                                gaps=req.prior_gaps,
-                                iterations=s.max_iterations, escalated=True)
+        # Nothing was ever submitted, so there is no application to carry --
+        # but the review console drives off `gaps`, so say why it is empty
+        # rather than presenting a blank form with nothing flagged.
+        return ExtractionResult(
+            application=ApplicationFields(),
+            gaps=req.prior_gaps or [FieldGap(
+                field_path="",
+                reason=f"the extraction agent reached its {s.max_iterations}"
+                       f"-iteration cap without submitting an application",
+                documents_searched=list(requested))],
+            iterations=s.max_iterations, escalated=True)

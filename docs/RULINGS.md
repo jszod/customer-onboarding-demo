@@ -744,9 +744,319 @@ of a task trades a rare unexplained error for a fresh class of cross-test
 interference. **Task 20 touches the test infrastructure anyway and is the right
 place.** If a third sighting lands first, do it then regardless.
 
+**Update (R-017).** The duplicate-collection fix halves the boots on its own —
+twelve scenarios were each starting a second `WorkflowEnvironment` — so the
+race surface is already smaller than when this was written. That is a
+reduction, not a fix: the hypothesis is untested either way, and the
+session-scoped `env` above is still the change to make.
+
+**Closed by R-019 — sighting 3 arrived and carried the traceback.**
+
+## R-017 — six defects found reviewing Task 13–17 before merge
+
+A code review of the workflow branch, run against the spec rather than the
+plan. All six were live on the branch and none were caught by the 163-test
+suite, which is the part worth noticing: every one of them is a *behaviour the
+tests asserted loosely enough to miss*.
+
+**1. `escalate` threw away everything the agent had extracted.** The child
+returned `ApplicationFields()` on the escalation branch. `prompts.py` steers
+the model to escalate on exactly §8.4's missing `dob`, so the demo's headline
+beat put the analyst in front of a blank application — and their
+`beneficial_owners[1].dob` edit then had no owner 1 to address. No
+`field_edits` could recover it, because `apply_edits` cannot append list
+members. `Escalation` now carries an optional `application`, the tool schema
+and system prompt ask for it on every escalation, and the workflow passes it
+through. **The gap between "escalation is a return value, not an exception"
+(which the rules say, and which was correctly implemented) and "escalation
+carries the work done so far" is where this hid.**
+
+**2. The client-ID chase was recorded once and then silently dropped.**
+`notify` keys its records on `(client_key, outcome, recipients, detail)` —
+R-005 chose that key deliberately — and the chase's `detail` was
+byte-identical on every iteration. Every chase after the first collided with
+the first and was discarded, so an unbounded wait produced exactly one
+notification. §9.3 also says the timer reminds *and* escalates, and this only
+ever reached the onboarding specialist. The detail now carries a chase counter
+and the second chase onward reaches the supervisor. **T-TIME-03 passed
+throughout: it asserted that a chase exists, not that chases keep arriving.**
+
+**3. The exhausted-attempts path described a review that never happened.** The
+detail hard-coded `"rejected N times; last note: ..."`. Three
+`ChildWorkflowError`s exhaust the loop without a single human decision, so
+that string was simply false — and it dropped `self._last_error`, the only
+record of the real cause, from both `OnboardingResult.detail` and the
+supervisor's notification. A rejection now records its note into
+`_last_error` too, and the exhausted path reports whatever actually happened
+last.
+
+**4. A second decision could replace one the workflow had already
+acknowledged.** `submit_review`'s validator gated on stage only and the
+handler assigned unconditionally. Two updates in one activation are both
+*validated* before either handler runs, so both acked `accepted=True` and the
+last writer won — an approval silently replaced by a reject. The guard has to
+be in the handler, before any `await`, for the check and the assignment to be
+one atomic step; the validator keeps a matching check so the ordinary
+sequential case is refused before it reaches history. **A validator cannot
+enforce a property that depends on other updates in the same activation.**
+
+**5. Escalation was measured from the reminder, not from the gate.** The
+second tier waited `sla_escalate - sla_remind`, started *after* the reminder's
+`notify` returned, so escalation always landed late by that activity's
+duration, and the timeout went zero or negative when `SLA_ESCALATE <=
+SLA_REMIND`. Both tiers are now offsets from `_pending_since`. The smallest of
+the six in practice — the drift is milliseconds at realistic SLAs — but the
+negative-timeout case worked only by accident.
+
+**6. Twelve scenarios ran twice.** The `T_WF_*`/`T_TIME_*` manifest wrappers
+delegated to functions named `test_...` in the topic modules, which pytest
+collects on their own as well, so each scenario booted a second
+`WorkflowEnvironment` for no added coverage. The T-CHILD and T-ACT wrappers
+already avoided this by naming their helpers `assert_...`; the workflow
+scenarios now do the same. 163 tests → 151, runtime 48s → 30s, and the
+manifest IDs are untouched.
+
+**On the tests.** Six new regression tests, each confirmed to fail on the
+pre-fix code and pass after — the check that separates a regression test from
+a restatement. Three further tests were written, passed against the unfixed
+code, and were kept as characterization rather than deleted or dressed up as
+pins: an escalation with no application still returning cleanly, a
+misconfigured `SLA_ESCALATE <= SLA_REMIND` still firing both tiers, and a late
+reject after a completed approval (which the *stage* guard already refused —
+the same-activation race is the case the new handler guard actually closes).
+**A test that passes before the fix pins nothing; say so rather than counting
+it.** Defect 5 needed a deliberately slow `notify` before its drift was
+observable at all, and is asserted against the timer duration recorded in
+history rather than against wall-clock arrival, so it does not depend on
+scheduling luck.
+
+## R-018 — eight defects found reviewing the merged activity and tooling code
+
+Numbered R-018 rather than R-017 on purpose: R-017 is the parallel review of
+the Task 13–17 workflow branch, which was in flight on its own branch when
+this was written. Two reviews ran at once and the numbers were reserved so the
+entries could not collide. **It worked**: this one merged first, R-017 landed
+after it, and the merge put both in number order above. The reservation cost
+nothing and the alternative — two entries both called R-017 — would have been
+unrecoverable in a log that is only useful if its references resolve.
+
+This one covers what was already on `main` — the activities, the fake core
+banking service, and the Makefile.
+
+**1. `make verify` — the definition of done — passed a failing suite.** The
+gate pipes pytest into `tee`, and the shell hands back **tee's** exit status,
+not pytest's. Everything then rested on a grep for "skipped". While skips
+remain that is masked, because the skip check fails first; the moment the last
+skip is implemented, a suite with real failures prints "VERIFY OK: 22/22
+scenarios implemented and passing" and exits 0. Reproduced end to end: a
+deliberately failing test, all skips removed, old gate — exit 0 and a green
+message. The status now travels through a file, checked before the skip check
+(`pipefail` is not POSIX and this Makefile does not choose its shell).
+
+**The earlier ruling on this file closed the wrong half.** *"Closed — `make
+verify`'s false green between Tasks 1 and 3"* looked at a gate that printed OK
+when nothing was skipped, decided the message "becomes true when the manifest
+lands", and closed it when the skip count started working. The skip half was
+real. The exit-status half was never looked at, and it is the half that
+survives to the end of the build — it only becomes reachable when the last
+skip goes. **A gate that has only ever been watched failing one of its two
+checks has not been tested; force the other one.**
+
+**2 and 3. `gaps.py` crashed on the escalation input it exists to describe.**
+`control_person` is optional and `REQUIRED_FIELD_PATHS` walks *through* it, so
+`compute_gaps(ApplicationFields())` took an `AttributeError` on None —
+`_get`'s loop assumed every parent exists. `apply_edits` had the same hole,
+plus two more: a composite path (`registered_address`) handed a line of text
+raised a raw `ValidationError`, and an index past the end of a list raised
+`IndexError`. The console renders a free-text box per gap and posts whatever
+is typed, so an analyst reached all three from the Approve button.
+
+`_get` now stops at an absent parent, `missing_required` drops a container
+whose leaves it is already reporting (a `control_person` row is unfillable; a
+`control_person.dob` row is not), and `apply_edits` builds an absent optional
+parent so the leaf edit lands, refuses a missing index by name, and converts a
+schema failure into a readable `ValueError`. **This contradicts R-011's claim
+that `apply_edits` handles any path — it handled every path the happy-path
+fixture produces.**
+
+**Left alone deliberately:** `registered_address` and `business_address` are
+listed whole in §5.2 and `FieldEdit.value` is a `str`, so no typed text can
+build an `Address`. An application missing an entire address is therefore
+still unapprovable — it now refuses readably instead of raising. Making it
+fillable means listing the address leaves in `REQUIRED_FIELD_PATHS`, which is
+a spec change, not a bug fix.
+
+**4. One corrupt file stopped every workflow.** `notify` did an unguarded
+`json.loads` on `notifications.json` and a non-atomic `write_text`. A worker
+killed mid-write leaves a truncated file; every subsequent `notify` then
+raises an unclassified error and retries on the default unlimited policy. Every
+terminal status goes through `notify`, so **no workflow could reach a terminal
+status** — one half-written file presenting as the whole system hanging, and a
+direct breach of "every failure path ends in a business status". Writes now go
+through a temp file and `os.replace`; an unreadable log is renamed aside (kept
+as evidence) and a new one started.
+
+**5. `call_llm` blocked the event loop.** The synchronous Anthropic client and
+`PdfReader` both ran directly inside an `async def`, holding the loop for up to
+`_CLIENT_TIMEOUT_SECONDS` (110s) and stalling every other activity on the
+worker, its workflow tasks, and its heartbeats. Both legs now go through
+`asyncio.to_thread`. **This is the same defect as R-009, and the fourth
+instance in this build.** It has now appeared often enough that finding it
+should be a checklist item on every `async def`, not a discovery.
+
+**6. A missing API key retried forever.** With no credential resolvable the
+SDK constructs happily with `api_key=None` and raises a bare `TypeError` from
+`messages.create` — not an `anthropic` error, so it misses every clause in the
+classification chain, escapes, and retries unbounded. A missing environment
+variable presented as a hung workflow. Now classified non-retryable, with the
+`FIXTURE_MODE=1` escape hatch named in the message. The clause is deliberately
+narrow (it re-raises a `TypeError` that is not about authentication) so a
+genuine bug in the call is not relabelled a credentials problem.
+
+**7. The fixture selector had an off-by-one and a silent clamp.**
+`min(len(turns), len(sequence) - 1)` is `-1` for an empty file, which indexes
+the empty list and raises `IndexError`; and once the agent runs past the end of
+the recording it replayed the last response forever, which presents as the
+agent looping to its iteration cap for no visible reason. Both are now
+non-retryable errors that say what to do.
+
+**8. Two smaller ones.** `make demo-reset` did not clear `.llm_down`, so a
+toggled model outage survived into the next demo — the flag lives beside
+`.store`, not inside it, because the path is DOCUMENT_STORE's *parent*, which
+defaults to the repo root. It was not in `.gitignore` either. And core
+banking's `assign` persisted the client ID and then posted the callback
+unguarded, so a gateway hiccup returned a bare 500 with the ID already minted
+and the workflow parked in `awaiting_client_id` with no idea one existed. It
+now returns a 502 naming the ID and saying to assign again — which is safe,
+because `assign_client_id` was already idempotent.
+
+**On the tests.** Sixteen added; fourteen were confirmed to fail on the
+pre-fix code. The two that did not are guards rather than pins and are labelled
+as such: one holds the new `TypeError` clause narrow, and one pins the
+atomic-write path, which cannot observe truncation without an actual crash
+mid-write. Suite: 124 passed → 140 passed, 19 skipped unchanged.
+
+
+## R-019 — the intermittent suite error, closed at sighting 3
+
+This entry closes *"Known weakness — the suite errors intermittently, twice
+seen, not reproduced"* above. That entry said the fix belonged to Task 20 **"or
+sooner on a third sighting"**. The third sighting arrived on the merge of
+`main` into the workflow branch, so this is that clause being honoured rather
+than a new decision.
+
+**What the third sighting added.** The first two were recorded as bare counts,
+one of them through `tail -2`, with the detail lost. This one carried the
+traceback:
+
+    RuntimeError: Failed starting Temporal dev server: Failed connecting to
+    test server after 5 seconds, last error: ... ConnectError("tcp connect
+    error", 127.0.0.1:42487, ConnectionRefused)
+
+That is the recorded hypothesis, confirmed: a function-scoped `env` boots a dev
+server per test, each claiming a port, each racing the next one's startup. It
+is a fixture error rather than a test failure for the same reason — the fault
+is in setup, and the test that happens to catch it is innocent. **Two sightings
+were enough to justify recording it and not enough to diagnose it; the third
+was only decisive because it was the one nobody piped through `tail`.** Capture
+the error before re-running, not after.
+
+**The fix.** `env` is now `scope="session", loop_scope="session"` — one server
+per run instead of roughly a dozen. `.claude/rules/testing.md` already
+sanctioned this (*"it is shareable via a pytest fixture"*), so no rule had to
+change to permit it; the rule now states the scopes and why they differ.
+
+`skip_env` stays function-scoped, and that asymmetry is the point. §16.3 says
+time-skipping environments cannot be shared, and these tests advance the clock
+by a year: one shared instance would let whichever test jumped forward first
+decide what "now" meant for every test after it — and that failure would
+present as another flake, which is precisely the hole this entry came out of.
+
+**The risk the old entry named, and what was actually done about it.** It
+warned that changing fixture scope "trades a rare unexplained error for a fresh
+class of cross-test interference". That is the right worry and it is testable:
+interference from a shared server would show as order-dependence. Four full
+runs in random order (`pytest-randomly` is on by default; `make verify` is the
+only thing that disables it) came back 177 passed / 4 skipped every time.
+
+Sharing is safe here for a specific, fragile reason worth writing down:
+**nothing in the suite shares names.** `run_worker` takes a fresh uuid4 task
+queue per test and every workflow id carries a uuid4, so two tests cannot see
+each other's workflows even on one server. A test that pins a fixed workflow id
+or task queue would break that, silently, and would look like a flake. Both the
+fixture docstring and the rule now say so.
+
+**Both scopes are pinned by `tests/test_fixture_scopes.py`,** asserted against
+pytest-asyncio's own fixture marker rather than by grepping the source — this
+repo has twice failed a source-grepping gate with a docstring, and a scope is a
+value that can be read directly. The guard was watched failing: reverting `env`
+to function scope fails it, which is the *"a gate nobody has seen fail is not
+known to work"* rule applied to the gate added in the same commit.
+
+**What is NOT claimed.** The error was never reproduced on demand, so this is a
+fix to the mechanism the traceback names, not a fix confirmed by watching the
+fault disappear. Absence over four runs is weak evidence — the fault was always
+rare. If it recurs with a session-scoped `env`, the port race was not the cause
+and this entry is wrong; the traceback is the thing to capture, again.
+
 ---
 
-## R-017 — the tracker: a broken test, and a failed run that read as a finished one
+## R-020 — `.env` is now a supported way to set config; Make reads it, not Python
+
+**Not from a task.** Asked, while picking the work back up locally, whether a
+template env file existed to copy the API key into. It did not, and the spec
+does not mention one: §17 lists seventeen variables and says nothing about how
+they get into the environment. That is a gap rather than one of §18's nine
+cuts, so this is a ruling.
+
+**What was added.** `.env.example` at the repo root, tracked, listing every
+§17 variable with its default and the demo-profile value beside the three SLA
+timers. `.env` is gitignored. `make/common.mk` gained two lines:
+
+    -include $(ROOT)/.env
+    export
+
+**Where the loading lives, and why not in Python.** The obvious alternative is
+`python-dotenv` inside `config.py`. It was rejected: `config.py` is imported
+by `python/workflows/`, where module-level import happens **inside the workflow
+sandbox**, and `load_dotenv()` is a filesystem read. That is the determinism
+rule, and buying a convenience with a sandbox violation is the wrong trade
+when Make can do it for free. Make also covers more ground — the gateway and
+the core banking service are separate processes started by recipes here, and
+neither imports `config.py`.
+
+**Two properties that had to be checked rather than assumed.**
+
+1. *The suite cannot be turned live by a stale `.env`.* `test` and `verify`
+   set `FIXTURE_MODE=1` inline in the recipe's shell command, which beats an
+   exported variable. A `.env` carrying `FIXTURE_MODE=0` does not reach them.
+2. *A missing `.env` is not an error.* The leading `-` on `include`. A fresh
+   clone with no file and no key still reaches `make verify`, which §16.7
+   requires.
+
+**The cost, stated because it will surprise someone.** A value in `.env` beats
+the same variable already exported in the shell — Make's file assignments win
+over the environment unless `-e` or `override` is in play. That is backwards
+from how most dotenv loaders behave, so `.env.example`'s header and the README
+both say it. The file is also read as Make syntax, not shell: `KEY=value` only,
+no quotes, no trailing `# comment` on a value line, `$$` for a literal dollar.
+The alternative — writing `?=` in the example so the shell wins — was rejected
+for making the file unsourceable by hand and stranger than it is worth.
+
+**Empty is not unset.** `ANTHROPIC_API_KEY=` copied and left blank exports an
+empty string, so the SDK sees a key, fails auth, and `llm.py` classifies a 401
+as a non-retryable `ClientError` — not the `AuthenticationError` its TypeError
+clause raises for genuinely absent credentials. Both are non-retryable and both
+name the problem, so this is documented rather than fixed.
+
+---
+
+## R-021 — the tracker: a broken test, and a failed run that read as a finished one
+
+*Renumbered from R-017 when this branch merged `main`. Main's R-017 — the Task
+13–17 review — landed in parallel while this branch sat unmerged, so both sides
+wrote an R-017, an R-018 and an R-019 with different content. Commit `1ae82f5`'s
+message calls this one R-017; history is not rewritten to match.*
 
 **Task 18.**
 
@@ -772,7 +1082,10 @@ step, ✗ at it, ○ after. One `stage` value, two surfaces, **and now the same
 reading on both** — which was the point of §12. Pinned by
 `test_a_failed_terminal_stage_says_so_rather_than_showing_seven_ticks`.
 
-## R-018 — R-014's deferred half, done: the field table is editable
+## R-022 — R-014's deferred half, done: the field table is editable
+
+*Renumbered from R-018 on the same merge — see R-021. Commit `1ae82f5`'s
+message calls this one R-018.*
 
 **Task 18**, as R-014 assigned it.
 
@@ -802,7 +1115,11 @@ the rest.
 
 ---
 
-## R-019 — Task 19 is blocked on the API key; the recorder is built and verified as far as it can be
+## R-023 — Task 19 is blocked on the API key; the recorder is built and verified as far as it can be
+
+*Renumbered from R-019 on the same merge — see R-021. Commit `5c217c1`'s
+message calls this one R-019, and `testing.md`'s promoted `sys.path` rule cites
+that number too.*
 
 **Task 19.** §16.7 step 2 records the fixtures by running the extraction loop
 live. `ANTHROPIC_API_KEY` is not set in this environment, so the recording did

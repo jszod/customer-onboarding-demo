@@ -47,7 +47,7 @@ async def _to_core(env, queue):
     return handle
 
 
-async def test_T_WF_07_timeout_then_duplicate_opens_exactly_one_account(env):
+async def assert_timeout_then_duplicate_opens_exactly_one_account(env):
     """THE HEADLINE (§10.1). The activity times out while the service keeps
     working; the retry carries the SAME key and gets `duplicate`."""
     seen_keys: list[str] = []
@@ -110,7 +110,7 @@ async def test_the_timeout_is_visible_in_status_while_it_retries(env):
     assert "attempt 1" in seen["last_error"]
 
 
-async def test_T_WF_08_core_rejection_completes_as_rejected_by_core(env):
+async def assert_core_rejection_completes_as_rejected_by_core(env):
     """§10.3 — a completed workflow with a business status, not a crash."""
 
     @activity.defn(name="open_account")

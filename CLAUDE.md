@@ -11,15 +11,16 @@ and `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
 documents, core banking, the gateway, the console, all four activities, the
 extraction child, and the parent's loop and happy path.
 
-Suite: **174 passed, 9 skipped.** Four skips are the T-REPLAY scenarios (Task
+Suite: **190 passed, 9 skipped.** Four skips are the T-REPLAY scenarios (Task
 20); five are `tests/test_fixtures.py`, skipped until the fixtures are
 recorded. That count is the progress bar, and `make verify` is correctly red
 until it reaches zero.
 
 **BLOCKED: Task 19 needs `ANTHROPIC_API_KEY`.** `tools/record_fixtures.py` is
 written and its guards are verified, but the recording itself has not happened —
-it runs the extraction loop live against the real documents (§16.7). Run
-`make fixtures` with a key set, review the recorded JSON in the diff, commit it.
+it runs the extraction loop live against the real documents (§16.7). Supply the
+key with `cp .env.example .env` and fill in the first line (R-020), then run
+`make fixtures`, review the recorded JSON in the diff, and commit it.
 The suite is keyless from then on. **Task 20 cannot start until this is done**:
 `make histories` replays through the fixtures.
 
@@ -33,7 +34,7 @@ separate prerequisite for `make demo`; see the README's Setup section.
 |----------|------------|
 | `docs/superpowers/specs/2026-09-04-customer-onboarding-design.md` | **The binding authority.** 22 sections. Settles everything. |
 | `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 21 tasks, 127 steps. How the spec gets built. |
-| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. R-014's deferred console work landed in Task 18 as R-018; no open questions remain. |
+| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. R-014's deferred console work landed in Task 18 as R-022; no open questions remain. **R-021–R-023 were renumbered from R-017–R-019 when the Task 18 branch merged `main`** — two branches wrote those three numbers in parallel, and the commit messages still use the old ones. |
 | `docs/demo-brief.md` | 11 numbered decisions with the reasoning and the **rejected** alternatives. |
 | `docs/DEVELOPMENT-PROCESS.md` | The four-stage process this repo follows. |
 

@@ -99,3 +99,42 @@ def test_notify_keeps_distinct_reminders(tmp_path):
             detail=f"KYC review reminder: attempt {attempt} awaiting review"))
     log = json.loads((tmp_path / "notifications.json").read_text())
     assert len(log) == 2
+
+
+def test_a_truncated_log_does_not_wedge_every_workflow(tmp_path):
+    """Every terminal status goes through `notify`. An unhandled decode error
+    here retries forever on the default policy, so ONE half-written file stops
+    every workflow from reaching a terminal status."""
+    import os
+    os.environ["OUTBOX_DIR"] = str(tmp_path)
+    log_path = tmp_path / "notifications.json"
+    log_path.write_text('[{"client_key": "acme-corp", "outcome": "com')
+
+    result = _run(notify, NotifyRequest(
+        client_key="acme-corp", client_id=None, outcome="completed",
+        recipients=["end_client"], detail="onboarding complete"))
+
+    assert result.delivered_to == ["end_client"]
+    written = json.loads(log_path.read_text())
+    assert [r["detail"] for r in written] == ["onboarding complete"]
+    assert (tmp_path / "notifications.json.corrupt").exists(), \
+        "the unreadable file is evidence -- keep it, renamed"
+
+
+def test_the_log_is_never_left_half_written(tmp_path):
+    """The write goes to a temp file and is renamed into place, so a reader
+    concurrent with a crash sees the old file or the new one, never a prefix."""
+    import os
+    os.environ["OUTBOX_DIR"] = str(tmp_path)
+    log_path = tmp_path / "notifications.json"
+
+    for i in range(3):
+        _run(notify, NotifyRequest(
+            client_key="acme-corp", client_id=None,
+            outcome="manual_intervention", recipients=["onboarding_specialist"],
+            detail=f"reminder {i}"))
+        json.loads(log_path.read_text())      # parses after every write
+
+    assert len(json.loads(log_path.read_text())) == 3
+    assert not list(tmp_path.glob(".notifications.json.*.tmp")), \
+        "the temp file must not be left behind"

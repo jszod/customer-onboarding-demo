@@ -1,7 +1,9 @@
+.env
 .superpowers/
 .store/
 outbox/
 core_banking/ledger.db
+.llm_down
 __pycache__/
 .venv/
 .pytest_cache/

@@ -62,6 +62,7 @@ class OnboardingWorkflow:
         self._core_attempt = 0
         self._core_request_id: str | None = None
         self._last_error: str | None = None
+        self._client_id_chase = 0
 
     def _track(self, req: ApplicationRequest, detail: str | None = None) -> None:
         """§12. One `stage` value, two surfaces: the console draws a stepper
@@ -103,8 +104,11 @@ class OnboardingWorkflow:
                     result_type=ExtractionResult,
                     id=f"{workflow.info().workflow_id}-extract-{self._attempt}")
             except ChildWorkflowError as e:
-                # A spent attempt, not a workflow failure (§10.3).
-                self._last_error = _failure_message(e)
+                # A spent attempt, not a workflow failure (§10.3). Label it
+                # with the attempt: this is the only record of why the attempt
+                # went, and the exhausted-attempts path below reports it.
+                self._last_error = (f"attempt {self._attempt} extraction "
+                                    f"failed: {_failure_message(e)}")
                 self._attempt += 1
                 continue
 
@@ -124,15 +128,25 @@ class OnboardingWorkflow:
                 self._application = gaps.apply_edits(self._application,
                                                      review.field_edits)
                 break
+            # A rejection is a spent attempt too, and it is the analyst's note
+            # that says why. Recording it here keeps `last_error` -- which §13
+            # puts on the console -- true of the most recent attempt whichever
+            # way it went, and gives the exhausted path below one thing to read.
+            self._last_error = (f"attempt {self._attempt} rejected: "
+                                f"{review.note or 'no note'}")
             self._attempt += 1
         else:
             # The loop ran out of attempts. `self._attempt` has been incremented
             # past the cap, so report the cap itself -- three attempts were made.
             self._attempt = SETTINGS.max_attempts
+            # Do NOT assume the attempts were rejections: three
+            # ChildWorkflowErrors exhaust the loop without a single human
+            # decision, and reporting "rejected 3 times" there describes a
+            # review that never happened while dropping the real cause.
             return await self._finish(
                 req, "manual_intervention", None,
-                f"rejected {SETTINGS.max_attempts} times; "
-                f"last note: {self._review.note if self._review else 'n/a'}")
+                f"{SETTINGS.max_attempts} attempts exhausted; "
+                f"{self._last_error or 'no further detail recorded'}")
 
         return await self._open_and_finish(req)
 
@@ -238,34 +252,48 @@ class OnboardingWorkflow:
         A workflow that approved a KYC application because a timer fired would
         be a compliance incident. Only a human closes this gate; the timers
         only nag. T-TIME-02 pins this by advancing a year."""
-        for delay, tier, recipients in (
+        # Each tier is an offset from when the gate OPENED, not from when the
+        # previous tier finished. Chaining the tiers (`sla_escalate -
+        # sla_remind` started after the reminder's notify returns) pushes
+        # escalation past SLA_ESCALATE by however long that activity took, and
+        # goes negative outright when SLA_ESCALATE <= SLA_REMIND.
+        opened_at = self._pending_since
+        for deadline, tier, recipients in (
                 (SETTINGS.sla_remind, "reminder",
                  ["onboarding_specialist"]),
-                (SETTINGS.sla_escalate - SETTINGS.sla_remind, "escalation",
+                (SETTINGS.sla_escalate, "escalation",
                  ["onboarding_specialist", "supervisor"])):
-            try:
-                # §12 wants the durable timer labelled on the Timeline. The
-                # parameter is `timeout_summary`, not `summary`.
-                await workflow.wait_condition(
-                    lambda: self._review is not None, timeout=delay,
-                    timeout_summary=f"KYC review SLA — {tier} at {delay}")
+            remaining = deadline - (workflow.now() - opened_at)
+            if remaining > timedelta(0):
+                try:
+                    # §12 wants the durable timer labelled on the Timeline. The
+                    # parameter is `timeout_summary`, not `summary`.
+                    await workflow.wait_condition(
+                        lambda: self._review is not None, timeout=remaining,
+                        timeout_summary=f"KYC review SLA — {tier} at {deadline}")
+                    return
+                except TimeoutError:
+                    pass
+            elif self._review is not None:
+                # The deadline was already behind us, so there was no timer to
+                # wait on -- but a decision may have arrived meanwhile.
                 return
-            except TimeoutError:
-                await workflow.execute_activity(
-                    "notify",
-                    NotifyRequest(
-                        client_key=req.client_key, client_id=None,
-                        outcome="manual_intervention", recipients=recipients,
-                        detail=f"KYC review {tier}: attempt {self._attempt} has "
-                               f"been awaiting review since {self._pending_since}"),
-                    result_type=NotifyResult,
-                    start_to_close_timeout=timedelta(seconds=30),
-                    summary=f"KYC review {tier}")
+            await workflow.execute_activity(
+                "notify",
+                NotifyRequest(
+                    client_key=req.client_key, client_id=None,
+                    outcome="manual_intervention", recipients=recipients,
+                    detail=f"KYC review {tier}: attempt {self._attempt} has "
+                           f"been awaiting review since {self._pending_since}"),
+                result_type=NotifyResult,
+                start_to_close_timeout=timedelta(seconds=30),
+                summary=f"KYC review {tier}")
         # Both tiers have fired. Keep waiting -- indefinitely, by design.
         await workflow.wait_condition(lambda: self._review is not None)
 
     async def _await_client_id(self, req: ApplicationRequest) -> None:
-        """§9.3. Same never-give-up basis: chase, never abandon."""
+        """§9.3. Same never-give-up basis: chase, never abandon -- and, like
+        §9.2, remind first and then escalate."""
         while True:
             try:
                 await workflow.wait_condition(
@@ -274,22 +302,48 @@ class OnboardingWorkflow:
                     timeout_summary=f"Client ID SLA — {SETTINGS.client_id_sla}")
                 return
             except TimeoutError:
+                self._client_id_chase += 1
+                # `notify` keys its records on
+                # (client_key, outcome, recipients, detail) -- R-005 chose that
+                # key so a Temporal retry appends nothing. A chase whose detail
+                # never varied would collide with the first one on every
+                # iteration and be dropped, leaving one notification for an
+                # unbounded wait. The chase count is what keeps them distinct.
+                tier = "reminder" if self._client_id_chase == 1 else "escalation"
+                recipients = (["onboarding_specialist"]
+                              if self._client_id_chase == 1
+                              else ["onboarding_specialist", "supervisor"])
                 await workflow.execute_activity(
                     "notify",
                     NotifyRequest(
                         client_key=req.client_key, client_id=None,
                         outcome="manual_intervention",
-                        recipients=["onboarding_specialist"],
-                        detail=f"still awaiting the client ID from core banking "
-                               f"(request {self._core_request_id})"),
+                        recipients=recipients,
+                        detail=f"client ID {tier} #{self._client_id_chase}: "
+                               f"still awaiting the client ID from core banking "
+                               f"(request {self._core_request_id}), pending "
+                               f"since {self._pending_since}"),
                     result_type=NotifyResult,
                     start_to_close_timeout=timedelta(seconds=30),
-                    summary="Chase the core banking client ID")
+                    summary=f"Chase the core banking client ID "
+                            f"(#{self._client_id_chase})")
 
     # --------------------------------------------------------- wire surface
 
     @workflow.update
     async def submit_review(self, submission: ReviewSubmission) -> ReviewAck:
+        # First decision wins. The validator below rejects a second one before
+        # it ever reaches history, but two updates delivered in the SAME
+        # activation are both validated before either handler runs, so the
+        # validator alone cannot close this: without the guard here the second
+        # write silently replaces an approval the workflow already
+        # acknowledged. There is deliberately no `await` above it -- the check
+        # and the assignment have to be one atomic step.
+        if self._review is not None:
+            raise ApplicationError(
+                f"a {self._review.decision} decision has already been recorded "
+                f"for attempt {self._attempt}",
+                type="DuplicateReview", non_retryable=True)
         self._review = submission
         return ReviewAck(accepted=True, stage=self._stage)
 
@@ -309,6 +363,9 @@ class OnboardingWorkflow:
             raise ValueError(f"not awaiting review (stage: {self._stage})")
         if self._application is None:
             raise ValueError("no extracted application to review")
+        if self._review is not None:
+            raise ValueError(f"a {self._review.decision} decision has already "
+                             f"been recorded for attempt {self._attempt}")
 
         if submission.decision == "reject":
             if not (submission.note or "").strip():
