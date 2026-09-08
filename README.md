@@ -59,7 +59,14 @@ The key is needed for exactly two things: running the live demo (`make demo`),
 and re-recording the fixtures (`make fixtures`, which §16.7 calls the one
 prerequisite a human must supply, and only once).
 
-    export ANTHROPIC_API_KEY=sk-ant-…
+    cp .env.example .env      # then put the key on the ANTHROPIC_API_KEY line
+
+`make` reads `.env` if it is there and exports it to the worker, gateway and
+core banking service. It is gitignored, it is optional — no file and no key
+still reaches `make verify` — and `.env.example` lists every §17 knob with its
+default, so the SLA timers and the demo profile are discoverable in one place.
+A plain `export ANTHROPIC_API_KEY=…` in your shell works just as well; note
+that a value in `.env` overrides it.
 
 ## Quickstart
 

@@ -998,3 +998,53 @@ fix to the mechanism the traceback names, not a fix confirmed by watching the
 fault disappear. Absence over four runs is weak evidence — the fault was always
 rare. If it recurs with a session-scoped `env`, the port race was not the cause
 and this entry is wrong; the traceback is the thing to capture, again.
+
+---
+
+## R-020 — `.env` is now a supported way to set config; Make reads it, not Python
+
+**Not from a task.** Asked, while picking the work back up locally, whether a
+template env file existed to copy the API key into. It did not, and the spec
+does not mention one: §17 lists seventeen variables and says nothing about how
+they get into the environment. That is a gap rather than one of §18's nine
+cuts, so this is a ruling.
+
+**What was added.** `.env.example` at the repo root, tracked, listing every
+§17 variable with its default and the demo-profile value beside the three SLA
+timers. `.env` is gitignored. `make/common.mk` gained two lines:
+
+    -include $(ROOT)/.env
+    export
+
+**Where the loading lives, and why not in Python.** The obvious alternative is
+`python-dotenv` inside `config.py`. It was rejected: `config.py` is imported
+by `python/workflows/`, where module-level import happens **inside the workflow
+sandbox**, and `load_dotenv()` is a filesystem read. That is the determinism
+rule, and buying a convenience with a sandbox violation is the wrong trade
+when Make can do it for free. Make also covers more ground — the gateway and
+the core banking service are separate processes started by recipes here, and
+neither imports `config.py`.
+
+**Two properties that had to be checked rather than assumed.**
+
+1. *The suite cannot be turned live by a stale `.env`.* `test` and `verify`
+   set `FIXTURE_MODE=1` inline in the recipe's shell command, which beats an
+   exported variable. A `.env` carrying `FIXTURE_MODE=0` does not reach them.
+2. *A missing `.env` is not an error.* The leading `-` on `include`. A fresh
+   clone with no file and no key still reaches `make verify`, which §16.7
+   requires.
+
+**The cost, stated because it will surprise someone.** A value in `.env` beats
+the same variable already exported in the shell — Make's file assignments win
+over the environment unless `-e` or `override` is in play. That is backwards
+from how most dotenv loaders behave, so `.env.example`'s header and the README
+both say it. The file is also read as Make syntax, not shell: `KEY=value` only,
+no quotes, no trailing `# comment` on a value line, `$$` for a literal dollar.
+The alternative — writing `?=` in the example so the shell wins — was rejected
+for making the file unsourceable by hand and stranger than it is worth.
+
+**Empty is not unset.** `ANTHROPIC_API_KEY=` copied and left blank exports an
+empty string, so the SDK sees a key, fails auth, and `llm.py` classifies a 401
+as a non-retryable `ClientError` — not the `AuthenticationError` its TypeError
+clause raises for genuinely absent credentials. Both are non-retryable and both
+name the problem, so this is documented rather than fixed.

@@ -1,4 +1,16 @@
 ROOT := $(shell cd $(dir $(lastword $(MAKEFILE_LIST)))/.. && pwd)
+
+# Local configuration: `cp .env.example .env`, then edit. Optional -- the
+# leading `-` means a missing file is not an error, so a fresh clone still
+# reaches `make verify` with no `.env` and no key (§16.7).
+#
+# `export` with no arguments hands every variable to the recipes' subprocesses,
+# which is the point: the worker, gateway and core banking service are each
+# started by a recipe here and read their config from the environment. Recipes
+# that set a variable inline still win -- `test` and `verify` force
+# FIXTURE_MODE=1 that way, so a stale `.env` cannot turn the suite live.
+-include $(ROOT)/.env
+export
 .PHONY: up down status logs demo demo-reset temporal gateway core-banking \
         worker kill-worker restart-worker test verify fixtures histories documents clean deps
 
