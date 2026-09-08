@@ -96,3 +96,20 @@ and then retries on the default unlimited policy — so the symptom is a hung
 caller rather than an error. Test stubs are handlers too.
 
 `core_banking/` never imports `temporalio` at all — it only speaks HTTP.
+
+## The transcript never ends on an assistant turn
+
+`call_llm` renders an `AgentTurn` with `role="assistant"` as an assistant
+message. An assistant message in last position is an assistant **prefill**, and
+prefill was removed across Claude 4.6+ — `claude-sonnet-5` included. It is a
+permanent 400 (`This model does not support assistant message prefill`), not a
+transient one, so there is no retry that recovers.
+
+Practically: **every non-terminal tool records its result** as an
+`AgentTurn(role="tool", ...)`, which `call_llm` maps to a user message. Add a
+tool, record its result — see `document_tool_turn()` and R-024. Never leave the
+result unrecorded because "the next request re-renders it anyway": the content
+may travel, but the transcript shape is what the API rejects.
+
+An empty result string fails the same call for a different reason — the API
+rejects empty content blocks too. Always say something.

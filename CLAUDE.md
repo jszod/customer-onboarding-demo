@@ -6,23 +6,28 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–18 have landed. Task 19 is next.** Skeleton and config, models
+**Plan Tasks 1–19 have landed. Task 20 is next.** Skeleton and config, models
 and `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
 documents, core banking, the gateway, the console, all four activities, the
 extraction child, and the parent's loop and happy path.
 
-Suite: **190 passed, 9 skipped.** Four skips are the T-REPLAY scenarios (Task
-20); five are `tests/test_fixtures.py`, skipped until the fixtures are
-recorded. That count is the progress bar, and `make verify` is correctly red
-until it reaches zero.
+Suite: **199 passed, 4 skipped.** The 4 remaining skips are the T-REPLAY
+scenarios, which Task 20 owns — every other manifest scenario is live. That
+count is the progress bar, and `make verify` is correctly red until it reaches
+zero.
 
-**BLOCKED: Task 19 needs `ANTHROPIC_API_KEY`.** `tools/record_fixtures.py` is
-written and its guards are verified, but the recording itself has not happened —
-it runs the extraction loop live against the real documents (§16.7). Supply the
-key with `cp .env.example .env` and fill in the first line (R-020), then run
-`make fixtures`, review the recorded JSON in the diff, and commit it.
-The suite is keyless from then on. **Task 20 cannot start until this is done**:
-`make histories` replays through the fixtures.
+`fixtures/acme-corp.json` is recorded and committed, so the suite is keyless.
+Two iterations: `request_documents`, then `submit_extraction` reporting
+`beneficial_owners[1].dob` — §8.4's deliberate gap, which is the escalation
+beat. Re-record (`make fixtures`, needs a key in `.env`) only if the prompt,
+`ApplicationFields`, or the document set changes.
+
+**Read R-024 before touching the agent loop or `prompts.TOOLS`.** The first
+live run failed twice on defects that were merged and green: the transcript
+ended on an assistant turn (a permanent 400 — prefill is gone on every 4.6+
+model), and the terminal tools declared `{"type": "object"}` for their
+payloads, which retries forever rather than failing. Both rules are now
+promoted into `.claude/rules/`.
 
 **Tasks 19–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
 SDK downloads its own server binaries from `temporal.download` at runtime — the

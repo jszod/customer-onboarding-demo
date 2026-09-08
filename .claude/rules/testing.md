@@ -131,3 +131,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 `record_fixtures.py` shipped without it and would have failed on the one step a
 human has to run themselves (R-023).
+
+## A stub proves our side of a contract, not the contract
+
+Every `call_llm` test hands `_create_message` a payload that already matches the
+Pydantic models, and every child-workflow test stubs the activity out. Both are
+correct, and both are blind to the two things a live call actually checks: the
+shape of the request that goes out, and the schema the model is handed. R-024
+found two merged, green defects that way — a transcript ending on an assistant
+turn (a permanent 400) and terminal tools declaring `{"type": "object"}` for
+their payloads.
+
+So: assert on **what crosses the boundary**, not on the constant that feeds it.
+Capture the kwargs `_create_message` receives and assert on those — a schema
+written correctly in `prompts.TOOLS` but never sent is worth nothing.
+
+And run the real thing once, deliberately, when a task first makes it possible.
+`make fixtures` is that run for the model call. Same shape as R-022's rule for
+the console: grepping the page is not driving it.

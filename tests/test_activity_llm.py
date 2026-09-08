@@ -300,6 +300,47 @@ def test_the_activity_resolves_requested_docs_from_the_store(tmp_path, monkeypat
     assert "ein_letter" in prompt
 
 
+def test_the_terminal_tools_carry_the_real_payload_schema():
+    """The model is told the shape it has to produce.
+
+    Every other test on this activity hands `_create_message` a payload that
+    already matches `ApplicationFields`, so all of them pass against a tool
+    schema of `{"type": "object"}` -- which tells the model nothing, and which
+    a live run answered with `field` for `field_path`, `'Passport'` for
+    `passport`, `'30%'` for a Decimal and a flat string for an `Address`.
+    Pydantic then rejects it as MalformedResponse, and §10.2 makes that
+    RETRYABLE: in the workflow the same impossible call retries forever, so
+    the symptom is a hung extraction rather than an error.
+
+    `payloads-and-activities.md` already requires this -- Pydantic "generates
+    the JSON schema handed to Claude for structured extraction". The assertion
+    is on what reaches `_create_message`, not on the constant, because the
+    schema only matters if it is actually sent.
+    """
+    seen = {}
+
+    def _capture(**kwargs):
+        seen.update(kwargs)
+        return _Message([_Block("escalate", {"gaps": []})])
+
+    with m.patch.object(llm, "_create_message", _capture):
+        _run(llm.live_call_llm, _request())
+
+    tools = {t["name"]: t["input_schema"] for t in seen["tools"]}
+    for name in ("submit_extraction", "escalate"):
+        schema = tools[name]
+        app = schema["properties"]["application"]
+        assert app.get("properties"), f"{name}: application has no schema"
+        assert "legal_name" in app["properties"]
+        gap = schema["properties"]["gaps"]["items"]
+        assert "field_path" in gap["properties"], f"{name}: gaps have no schema"
+        # $ref targets must resolve inside the schema the API is handed.
+        rendered = json.dumps(schema)
+        assert '"passport"' in rendered, f"{name}: the id_type enum never reaches the model"
+        if "$ref" in rendered:
+            assert schema.get("$defs"), f"{name}: dangling $ref -- no $defs at the root"
+
+
 def test_an_unknown_doc_id_does_not_raise(tmp_path, monkeypatch):
     """§19.2 in spirit — an id outside the manifest is reported to the model,
     not raised. The manifest check is the workflow's job (§8.1)."""

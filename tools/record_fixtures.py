@@ -28,6 +28,10 @@ from python.activities.llm import live_call_llm
 from python.models.documents import IngestRequest
 from python.models.extraction import (AgentTurn, DocumentRequest, Escalation,
                                       ExtractionSubmission, LLMRequest)
+# The loop below is a hand-rolled copy of ExtractionAgentWorkflow's -- §16.7
+# records without a Temporal server -- so the one piece with a rule attached to
+# it is imported rather than reimplemented. See its docstring.
+from python.workflows.extraction import document_tool_turn
 
 CLIENT_KEY = "acme-corp"
 OUT = Path("fixtures")
@@ -62,6 +66,7 @@ async def main() -> None:
             for doc_id in action.doc_ids:
                 if doc_id in known and doc_id not in requested:
                     requested.append(doc_id)
+            turns.append(document_tool_turn(action.doc_ids, known))
             continue
         if isinstance(action, (ExtractionSubmission, Escalation)):
             terminal = action

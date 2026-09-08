@@ -1154,3 +1154,93 @@ a signal for everything else.
 in the diff, commit it. The suite is keyless from then on. Task 20 needs the
 fixtures in place before it can capture histories, so the build is blocked here
 until someone supplies the key.
+
+---
+
+## R-024 — two defects the first live run found, both invisible to every stub
+
+**Task 19.** R-023 left this task blocked on the API key. With the key supplied
+(R-020's `.env`), `make fixtures` failed twice before it recorded anything, on
+two faults that had been sitting in merged, green code. Both were unreachable
+from the suite for the same reason, which is the part worth keeping.
+
+### 1. The agent loop ended its transcript on an assistant turn
+
+    anthropic.BadRequestError: 400 — This model does not support assistant
+    message prefill. The conversation must end with a user message.
+
+`call_llm` renders an `AgentTurn` with `role="assistant"` as an assistant
+message. The loop appended the model's action as an assistant turn on every
+iteration, but appended the **tool's result** only when `request_documents`
+named an unknown id. So the success path — the normal path — left the
+transcript ending on an assistant turn, which is an assistant *prefill*.
+Prefill was removed across the 4.6+ family, `claude-sonnet-5` included: it is a
+permanent 400, not a transient one.
+
+Iteration 1 always worked (`turns` is empty, so the request is a lone user
+message) and iteration 2 always failed. Any run that read a document — again,
+the normal path — hit it.
+
+**Fixed at the loop, not at the boundary.** `document_tool_turn()` now records
+the result of *every* `request_documents` call, granted ids and unknown ids
+alike. That is the correct tool-loop shape independently of the API rule, and
+the API rule then falls out of it. Ids only, never text (§8.2), and it also
+covers an empty `doc_ids`, which would otherwise send an empty content block —
+a different 400 on the same call.
+
+`tools/record_fixtures.py` hand-rolls this loop, because §16.7 records without
+a Temporal server, and it had the identical omission. It now imports
+`document_tool_turn` rather than keeping a second copy of the rule.
+
+**This changes the child's history shape.** Task 20 captures the T-REPLAY
+histories through this loop, so it must run after this fix — a history captured
+last week would encode the broken transcript.
+
+### 2. The terminal tools told the model nothing about the payload shape
+
+`submit_extraction` and `escalate` declared `application` and `gaps` as bare
+`{"type": "object"}`. Handed no schema, the model answered with `field` instead
+of `field_path`, `'Passport'` instead of the `passport` enum, `'30%'` for a
+`Decimal`, and a flat string where an `Address` belongs. Pydantic rejected all
+of it.
+
+**The failure mode is worse than the error suggests.** §10.2 classifies
+MalformedResponse as *retryable*, so in the workflow — rather than in the
+recorder's `ActivityEnvironment`, which does not retry — that same impossible
+call retries on an unlimited policy. The demo would not have shown an error; it
+would have hung, which `workflow-determinism.md` already warns is what a defect
+on this path looks like.
+
+`payloads-and-activities.md` had required the fix all along: Pydantic
+"generates the JSON schema handed to Claude for structured extraction". It now
+does, via `prompts._terminal_payload_schema()`, with `$defs` hoisted to the
+schema root where the generated `$ref`s resolve. Generated rather than
+transcribed, so a new field on `ApplicationFields` teaches the model about it
+in the same commit.
+
+### Why the suite could not have caught either
+
+Every test of `call_llm` hands `_create_message` a payload **that already
+matches the Pydantic models**, and every test of the child stubs the activity
+out entirely. Both are correct tests of the code they cover, and both are
+structurally blind to the two things that broke: the shape of the request that
+goes out, and the schema the model is given. Stubs test our side of a contract;
+only a live call tests the contract.
+
+Two new tests close the specific holes — the transcript's last turn, and the
+schema as it reaches `_create_message` rather than as written in the constant —
+and the general lesson is promoted to `testing.md` below.
+
+## Promoted to rules
+
+**A stub proves our side of a contract, not the contract** — added to
+`testing.md`. Second occurrence in this family: R-022 promoted *"a test that
+greps a page proves the string is there, not that the page works"* for the
+console, and this is the same fault one layer down. The remedy is the same
+shape too — run the real thing once, deliberately, and assert on what crosses
+the boundary.
+
+**Never let the transcript end on an assistant turn** — added to
+`payloads-and-activities.md`, on the *"it will bite a task you can name"*
+clause: Task 20 replays this loop, and every future tool has to record its
+result or reintroduce the same 400.

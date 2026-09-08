@@ -18,6 +18,7 @@ from python.models.extraction import (AgentTurn, DocumentRequest, Escalation,
                                       ExtractionRequest, ExtractionResult,
                                       ExtractionSubmission,
                                       FieldGap, LLMRequest, LLMResponse)
+from python.workflows import extraction
 from python.workflows.extraction import ExtractionAgentWorkflow
 
 
@@ -178,6 +179,45 @@ def test_unknown_doc_id_is_a_tool_error_not_an_exception():
     result = _execute(stub, _request())
     assert result.escalated is True
     assert any("unknown" in t.content.lower() for t in seen[1].turns)
+
+
+def test_a_successful_document_request_is_recorded_as_a_tool_turn():
+    """The transcript must never end on an assistant turn. `call_llm` maps an
+    assistant turn to an assistant message, and an assistant message in last
+    position is an assistant PREFILL -- removed on Sonnet 5 and every 4.6+
+    model, which reject it with a 400 (`This model does not support assistant
+    message prefill`). Every non-terminal tool therefore records its result,
+    and the ONLY reason the unknown-id path above did so was that it had an
+    error to report.
+
+    Ids only, never text: §8.2 keeps document content out of history, and the
+    activity re-renders the requested documents into the user message anyway.
+    """
+    stub, seen = _scripted(
+        LLMResponse(action=DocumentRequest(doc_ids=["ein-letter"],
+                                           rationale="tax id"), turn=_turn()),
+        LLMResponse(action=Escalation(gaps=[]), turn=_turn()))
+    _execute(stub, _request())
+    assert seen[1].turns[-1].role == "tool"
+    assert "ein-letter" in seen[1].turns[-1].content
+
+
+def test_the_tool_turn_reports_granted_and_unknown_ids_together():
+    """One request can be partly valid. Both halves are reported, so the model
+    learns which ids it may not ask for again."""
+    turn = extraction.document_tool_turn(["ein-letter", "nope"],
+                                         {"ein-letter", "w9"})
+    assert turn.role == "tool"
+    assert "now readable: ein-letter" in turn.content
+    assert "unknown document ids: nope" in turn.content
+    assert "w9" in turn.content              # what IS available
+
+
+def test_the_tool_turn_is_never_empty():
+    """An empty `doc_ids` would render an empty content block, which the API
+    rejects for the same reason it rejects the prefill -- a different 400 on
+    the same call."""
+    assert extraction.document_tool_turn([], {"w9"}).content.strip()
 
 
 def test_child_has_exactly_one_activity():
