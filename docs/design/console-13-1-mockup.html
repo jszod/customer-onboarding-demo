@@ -1,0 +1,830 @@
+<title>Onboarding Console §13.1</title>
+<style>
+/* ===========================================================================
+   REVIEW-PAGE CHROME. Follows the viewer's theme.
+   Deliberately a shade deeper than the console's own ground on both sides, so
+   the framed previews sit ON the page instead of merging into it.
+   =========================================================================== */
+:root {
+  color-scheme: light;
+  --pg-ground:  #eceae4;
+  --pg-panel:   #ffffff;
+  --pg-sunk:    #f6f5f1;
+  --pg-ink:     #14161b;
+  --pg-ink-2:   #5d6472;
+  --pg-line:    #dcd8ce;
+  --pg-accent:  #2a4b9b;
+  --pg-accent-wash: #e7edfa;
+  --pg-flag:    #a1620a;
+  --pg-flag-wash: #fbf1e0;
+  --pg-shadow:  0 1px 2px rgba(20,22,27,.05), 0 8px 28px rgba(20,22,27,.07);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --pg-ground:  #08090c;
+    --pg-panel:   #121519;
+    --pg-sunk:    #171b21;
+    --pg-ink:     #eef0f4;
+    --pg-ink-2:   #99a1b2;
+    --pg-line:    #232830;
+    --pg-accent:  #7fa3ff;
+    --pg-accent-wash: #182031;
+    --pg-flag:    #e8ad4a;
+    --pg-flag-wash: #2a2314;
+    --pg-shadow:  0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --pg-ground:  #08090c;
+  --pg-panel:   #121519;
+  --pg-sunk:    #171b21;
+  --pg-ink:     #eef0f4;
+  --pg-ink-2:   #99a1b2;
+  --pg-line:    #232830;
+  --pg-accent:  #7fa3ff;
+  --pg-accent-wash: #182031;
+  --pg-flag:    #e8ad4a;
+  --pg-flag-wash: #2a2314;
+  --pg-shadow:  0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.4);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--pg-ground);
+  color: var(--pg-ink);
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+.mono, code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 48px 28px 96px; }
+
+.doc-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 40px; }
+.doc-eyebrow {
+  font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--pg-accent);
+}
+h1 { margin: 0; font-size: clamp(28px, 4vw, 40px); font-weight: 700; letter-spacing: -.025em; text-wrap: balance; }
+.doc-sub { margin: 0; max-width: 68ch; color: var(--pg-ink-2); font-size: 17px; }
+
+h2 {
+  margin: 0 0 4px; font-size: 22px; font-weight: 650; letter-spacing: -.02em;
+  text-wrap: balance;
+}
+.sec { margin-top: 52px; display: flex; flex-direction: column; gap: 20px; }
+.sec-note { margin: 0; max-width: 72ch; color: var(--pg-ink-2); font-size: 15px; }
+
+/* --- the two decisions ---------------------------------------------------- */
+.decisions { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.decision {
+  background: var(--pg-panel); border: 1px solid var(--pg-line);
+  border-left: 4px solid var(--pg-flag);
+  border-radius: 12px; padding: 20px 22px;
+  box-shadow: var(--pg-shadow);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.decision h3 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+.decision p { margin: 0; font-size: 14.5px; color: var(--pg-ink-2); }
+.decision .tag {
+  align-self: flex-start;
+  font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--pg-flag); background: var(--pg-flag-wash);
+  border-radius: 999px; padding: 4px 11px;
+}
+.ab { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 14px; }
+.ab .was { color: var(--pg-ink-2); text-decoration: line-through; }
+.ab .now { color: var(--pg-ink); font-weight: 650; }
+
+/* --- console frames ------------------------------------------------------- */
+/* Stacked, not side by side. The console is designed for ~1180px; showing it
+   in a half-width column scrolls the stepper and misreports the layout,
+   because media queries answer to the viewport and not to this container. */
+.frames { display: flex; flex-direction: column; gap: 32px; }
+.frame-wrap { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.frame-label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--pg-ink-2);
+}
+.frame-label .dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--pg-line); }
+.frame-label .dot.l { background: #f4f2ee; }
+.frame-label .dot.d { background: #0e1014; }
+.frame {
+  border: 1px solid var(--pg-line); border-radius: 12px;
+  overflow: hidden; box-shadow: var(--pg-shadow);
+}
+
+/* ===========================================================================
+   THE CONSOLE, PER §13.1. Everything below is the reference implementation.
+   Tokens are scoped to [data-scheme] and hardcoded — never media-driven — so
+   both themes render side by side whatever theme the viewer is in.
+   =========================================================================== */
+.console[data-scheme="light"] {
+  --surface-0: #f4f2ee;
+  --surface-1: #ffffff;
+  --surface-2: #faf9f6;
+  --text-1:    #14161b;
+  --text-2:    #5d6472;
+  --border:        #e3e0d8;
+  --border-strong: #cfcbc0;
+  --accent:      #2a4b9b;
+  --accent-ink:  #ffffff;
+  --accent-wash: #eaeffb;
+  --done:       #16755a;
+  --done-wash:  #e6f3ee;
+  --wait:       #a1620a;
+  --wait-wash:  #fbf1e0;
+  --alert:      #ab2020;
+  --alert-wash: #fbebe9;
+  --control-bg:    #ffffff;
+  --control-hover: #f4f2ee;
+  --focus-ring: color-mix(in srgb, var(--accent) 40%, transparent);
+  --shadow: 0 1px 2px rgba(20,22,27,.06), 0 6px 20px rgba(20,22,27,.05);
+}
+.console[data-scheme="dark"] {
+  --surface-0: #0e1014;
+  --surface-1: #171a20;
+  --surface-2: #1d212a;
+  --text-1:    #eef0f4;
+  --text-2:    #99a1b2;
+  --border:        #272c36;
+  --border-strong: #38404e;
+  --accent:      #7fa3ff;
+  --accent-ink:  #0e1014;
+  --accent-wash: #1b2436;
+  --done:       #4ac79b;
+  --done-wash:  #142b25;
+  --wait:       #e8ad4a;
+  --wait-wash:  #2c2415;
+  --alert:      #ff7b72;
+  --alert-wash: #2e1a1a;
+  --control-bg:    #0f1318;
+  --control-hover: #18202a;
+  --focus-ring: color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
+.console {
+  /* type scale — six sizes */
+  --fs-eyebrow: 11px;
+  --fs-meta:    13px;
+  --fs-ui:      14px;
+  --fs-body:    15px;
+  --fs-title:   17px;
+  --fs-display: 21px;
+  /* spacing — 4px grid */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 28px; --sp-8: 32px;
+  --radius: 10px;
+  --radius-sm: 8px;
+
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  font-weight: 500;
+}
+.console code, .console .mono { font-size: .86em; letter-spacing: -.01em; }
+.console h1, .console h2, .console h3 { margin: 0; font-weight: 600; letter-spacing: -.015em; }
+.console button, .console input { font: inherit; }
+
+.console .topbar {
+  display: flex; align-items: center; gap: var(--sp-6); flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-7);
+  background: var(--surface-1); border-bottom: 1px solid var(--border);
+}
+.console .brand { display: flex; align-items: center; gap: var(--sp-3); }
+.console .mark {
+  width: 34px; height: 34px; border-radius: var(--radius-sm); flex: none;
+  background: var(--accent); color: var(--accent-ink);
+  display: grid; place-items: center; font-size: var(--fs-title); font-weight: 700;
+}
+.console .brand-name { font-size: var(--fs-body); font-weight: 600; letter-spacing: -.01em; }
+.console .brand-sub  { font-size: var(--fs-eyebrow); color: var(--text-2); }
+.console .client { padding-left: var(--sp-6); border-left: 1px solid var(--border); }
+.console .client-name { font-size: var(--fs-display); font-weight: 600; letter-spacing: -.02em; }
+.console .client-meta { font-size: var(--fs-meta); color: var(--text-2); margin-top: var(--sp-1); }
+.console .topbar-right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); }
+.console .tui-link {
+  color: var(--text-2); text-decoration: none; font-size: var(--fs-meta);
+  border: 1px solid var(--border-strong); border-radius: 999px; padding: var(--sp-1) var(--sp-3);
+  white-space: nowrap;
+}
+.console .tui-link:hover { color: var(--text-1); border-color: var(--text-1); }
+
+.console .pill {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border-radius: 999px;
+  font-size: var(--fs-meta); font-weight: 600; letter-spacing: .01em;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.console .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.console .pill.is-waiting { color: var(--wait); background: var(--wait-wash); }
+.console .pill.is-waiting::before { animation: beat 1.8s ease-in-out infinite; }
+@keyframes beat { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+.console main { padding: var(--sp-6) var(--sp-7) var(--sp-8); }
+.console .panel {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.console .eyebrow {
+  font-size: var(--fs-eyebrow); font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text-2);
+}
+
+.console .stepper {
+  list-style: none; margin: 0 0 var(--sp-6); padding: 0;
+  display: grid; grid-template-columns: repeat(7, minmax(96px, 1fr));
+  gap: var(--sp-2); overflow-x: auto; scrollbar-width: thin; padding-bottom: var(--sp-1);
+}
+.console .stepper li {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: var(--sp-3); position: relative; overflow: hidden;
+}
+.console .stepper li::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--border-strong); }
+.console .step-n {
+  display: inline-grid; place-items: center; width: 21px; height: 21px; border-radius: 50%;
+  font-size: var(--fs-eyebrow); font-weight: 700; font-variant-numeric: tabular-nums;
+  background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong);
+}
+.console .step-label { display: block; margin-top: var(--sp-2); font-size: var(--fs-ui); font-weight: 500; letter-spacing: -.01em; color: var(--text-2); }
+.console .stepper li.is-done::before { background: var(--done); }
+.console .stepper li.is-done .step-n { background: var(--done); border-color: var(--done); color: var(--surface-1); }
+.console .stepper li.is-done .step-label { color: var(--text-1); }
+.console .stepper li.is-current { border-color: var(--accent); background: var(--accent-wash); }
+.console .stepper li.is-current::before { background: var(--accent); }
+.console .stepper li.is-current .step-n { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.console .stepper li.is-current .step-label { color: var(--text-1); font-weight: 600; }
+
+.console .detail { padding: var(--sp-5); margin-bottom: var(--sp-4); }
+.console .detail-head { display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap; }
+.console .detail-title { font-size: var(--fs-display); font-weight: 600; letter-spacing: -.02em; }
+.console .detail-note { color: var(--text-2); font-size: var(--fs-ui); margin-top: var(--sp-2); max-width: 78ch; }
+.console .facts { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-8); margin-top: var(--sp-4); }
+.console .fact-k { font-size: var(--fs-eyebrow); font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--text-2); }
+.console .fact-v { font-size: var(--fs-title); font-weight: 600; font-variant-numeric: tabular-nums; margin-top: var(--sp-1); }
+.console .fact-v.is-alert { color: var(--alert); }
+.console .fact-v.is-done  { color: var(--done); }
+
+.console .review { margin-bottom: var(--sp-4); overflow: hidden; }
+.console .review-head {
+  padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+}
+.console .review-head h2 { font-size: var(--fs-title); }
+.console .review-who { margin-left: auto; font-size: var(--fs-meta); color: var(--text-2); }
+.console .gaps { border-left: 4px solid var(--alert); background: var(--alert-wash); padding: var(--sp-5); }
+.console .gaps-title { font-size: var(--fs-body); font-weight: 600; color: var(--text-1); }
+.console .gaps-sub { font-size: var(--fs-meta); color: var(--text-2); margin-top: var(--sp-1); }
+.console .gap {
+  margin-top: var(--sp-4); background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: var(--sp-4);
+}
+.console .gap-label { font-size: var(--fs-body); font-weight: 600; letter-spacing: -.01em; }
+.console .gap-path { font-size: var(--fs-meta); color: var(--text-2); margin-left: var(--sp-2); }
+.console .gap-reason { font-size: var(--fs-ui); color: var(--text-2); margin-top: var(--sp-1); }
+.console .gap-docs { margin-top: var(--sp-2); display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+.console .chip {
+  font-size: var(--fs-eyebrow); padding: var(--sp-1) var(--sp-2); border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-2);
+}
+.console .gap input[type=text] {
+  margin-top: var(--sp-3); width: 100%; max-width: 460px;
+  padding: var(--sp-2) var(--sp-3); font-size: var(--fs-body);
+  color: var(--text-1); background: var(--surface-2);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+}
+
+.console .verified { padding: var(--sp-1) var(--sp-5) var(--sp-2); }
+.console .verified summary {
+  cursor: pointer; list-style: none; padding: var(--sp-3) 0;
+  font-size: var(--fs-ui); color: var(--text-2); display: flex; align-items: center; gap: var(--sp-2);
+}
+.console .verified summary::-webkit-details-marker { display: none; }
+.console .verified summary::before { content: "▸"; color: var(--text-2); font-size: var(--fs-meta); }
+.console .verified[open] summary::before { content: "▾"; }
+.console .verified summary b { color: var(--done); font-variant-numeric: tabular-nums; font-weight: 700; }
+.console .grp { margin: var(--sp-2) 0 var(--sp-4); }
+.console .grp h3 { font-size: var(--fs-eyebrow); letter-spacing: .09em; text-transform: uppercase; color: var(--text-2); margin-bottom: var(--sp-2); font-weight: 700; }
+.console table.fields { width: 100%; border-collapse: collapse; font-size: var(--fs-ui); }
+.console table.fields th, .console table.fields td {
+  text-align: left; padding: var(--sp-2) var(--sp-3) var(--sp-2) 0;
+  border-bottom: 1px solid var(--border); vertical-align: top;
+}
+.console table.fields th { font-weight: 500; color: var(--text-2); width: 240px; }
+.console table.fields td { font-weight: 500; }
+.console table.fields td.val { cursor: text; border-radius: var(--radius-sm); }
+.console table.fields td.val:hover { background: var(--accent-wash); }
+
+.console .review-actions {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--border); background: var(--surface-2);
+}
+.console .attest { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-body); cursor: pointer; }
+.console .attest input, .console .toggle input { width: 17px; height: 17px; accent-color: var(--accent); }
+.console .spacer { flex: 1 1 auto; }
+
+.console .btn {
+  border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-body); font-weight: 600;
+  border: 1px solid var(--border-strong); background: var(--control-bg); color: var(--text-1);
+  cursor: pointer; letter-spacing: -.005em; white-space: nowrap;
+}
+.console .btn:hover { background: var(--control-hover); border-color: var(--text-1); }
+.console .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.console .btn.go { background: var(--done); border-color: var(--done); color: #fff; }
+.console .btn.quiet { background: transparent; }
+.console .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.console .cols { display: grid; grid-template-columns: 1.55fr 1fr; gap: var(--sp-4); align-items: start; }
+.console .card-head { padding: var(--sp-4) var(--sp-5) 0; }
+.console .card-body { padding: var(--sp-3) var(--sp-5) var(--sp-4); }
+.console .action, .console .toggle { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3) 0; }
+.console .action + .action, .console .toggle + .toggle { border-top: 1px solid var(--border); }
+.console .action .txt { flex: 1 1 auto; }
+.console .action .who { font-size: var(--fs-eyebrow); font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--text-2); }
+.console .action .sub, .console .toggle .sub { font-size: var(--fs-meta); color: var(--text-2); margin-top: var(--sp-1); }
+.console .toggle .t { font-size: var(--fs-body); font-weight: 500; }
+.console .footnote { margin-top: var(--sp-5); font-size: var(--fs-eyebrow); color: var(--text-2); }
+
+/* focus, §13.1.5 — every interactive element */
+.console .btn:focus-visible,
+.console .tui-link:focus-visible,
+.console .gap input[type=text]:focus-visible,
+.console .attest input:focus-visible,
+.console .toggle input:focus-visible,
+.console table.fields td.val:focus-visible {
+  outline: 3px solid var(--focus-ring); outline-offset: 2px; border-color: var(--accent);
+}
+
+/* --- specimens ------------------------------------------------------------ */
+.spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.card {
+  background: var(--pg-panel); border: 1px solid var(--pg-line);
+  border-radius: 12px; padding: 20px 22px; box-shadow: var(--pg-shadow);
+}
+.card h3 {
+  margin: 0 0 14px; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--pg-ink-2);
+}
+.scale-row { display: flex; align-items: baseline; gap: 14px; padding: 7px 0; border-bottom: 1px solid var(--pg-line); }
+.scale-row:last-child { border-bottom: 0; }
+.scale-row .tok { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--pg-accent); min-width: 108px; }
+.scale-row .px  { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--pg-ink-2); min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.scale-row .sample { flex: 1; letter-spacing: -.01em; }
+
+.swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; }
+.sw { border: 1px solid var(--pg-line); border-radius: 10px; overflow: hidden; }
+.sw .chipbar { height: 44px; display: flex; }
+.sw .chipbar i { flex: 1; }
+.sw .lbl { padding: 8px 10px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--pg-ink-2); background: var(--pg-sunk); }
+
+.grid-demo { display: flex; align-items: flex-end; gap: 8px; }
+.grid-demo .bar { background: var(--pg-accent); border-radius: 3px 3px 0 0; width: 26px; opacity: .85; }
+.grid-demo .cap { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--pg-ink-2); text-align: center; }
+.grid-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+
+table.diff { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+table.diff th, table.diff td { text-align: left; padding: 9px 14px 9px 0; border-bottom: 1px solid var(--pg-line); vertical-align: top; }
+table.diff th { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--pg-ink-2); }
+table.diff td.was { color: var(--pg-ink-2); font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+table.diff td.now { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; font-weight: 600; }
+.scroll { overflow-x: auto; }
+
+footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--pg-line); color: var(--pg-ink-2); font-size: 14px; }
+footer code { font-size: 13px; }
+
+a { color: var(--pg-accent); }
+a:focus-visible, summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--pg-accent) 40%, transparent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="wrap">
+
+  <div class="doc-head">
+    <div class="doc-eyebrow">Task 22 · Step 1 · approve before any CSS moves</div>
+    <h1>The onboarding console, per §13.1</h1>
+    <p class="doc-sub">
+      §13.1 was written from reading the stylesheet, not from looking at the page.
+      This is what it produces. Both themes are shown at once and are forced —
+      they ignore your system setting, so you are seeing the real pair rather
+      than whichever one you happen to be in.
+    </p>
+  </div>
+
+  <section class="sec">
+    <h2>Two changes you have to agree to</h2>
+    <p class="sec-note">
+      Everything else in §13.1 is cleanup — collapsing duplicate values, fixing a
+      breakpoint that disagreed with itself, adding focus rings that were never
+      there. These two are visible design changes, and they are the reason this
+      page exists.
+    </p>
+    <div class="decisions">
+      <div class="decision">
+        <span class="tag">Decision 1</span>
+        <h3>All body copy gets one step heavier</h3>
+        <p>
+          <code>body</code> currently declares no weight, so unstyled text renders at 400.
+          §13.1's three weights are 500 / 600 / 700, so <code>body</code> now declares 500 —
+          every paragraph, note, sub-label and table cell gains a step. Intended:
+          §13.1's first principle is <em>scanned, not read</em>. But it is the single
+          most visible change in the task.
+        </p>
+        <div class="ab"><span class="was">font-weight: 400</span> <span class="now">→ 500</span></div>
+      </div>
+      <div class="decision">
+        <span class="tag">Decision 2</span>
+        <h3>The current-stage title grows to 21px</h3>
+        <p>
+          <code>.detail-title</code> — the "what is happening right now" headline — was 19px.
+          The six-size scale has no 19px step, so it either drops to 17px and joins the
+          panel headings, or rises to 21px and matches the client name. It rises: on a
+          projector this is the line the room is reading.
+        </p>
+        <div class="ab"><span class="was">19px</span> <span class="now">→ 21px (--fs-display)</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>The review gate, both themes</h2>
+    <p class="sec-note">
+      The escalation beat — extraction finished, 28 fields verified, and
+      <code>beneficial_owners[1].dob</code> is the §8.4 deliberate gap that no document
+      contains. This is the screen the demo lands on, so it is the one worth judging.
+      Both are shown at full width, because that is the laptop the demo is driven on.
+    </p>
+
+    <div class="frames">
+      <div class="frame-wrap">
+        <div class="frame-label"><span class="dot l"></span> Light — the default</div>
+        <div class="frame">
+          <div class="console" data-scheme="light">
+            <header class="topbar">
+              <div class="brand">
+                <span class="mark">CB</span>
+                <div>
+                  <div class="brand-name">Commercial Banking</div>
+                  <div class="brand-sub">Client onboarding</div>
+                </div>
+              </div>
+              <div class="client">
+                <div class="client-name">Acme Holdings LLC</div>
+                <div class="client-meta"><code>onboarding-acme-corp</code></div>
+              </div>
+              <div class="topbar-right">
+                <span class="pill is-waiting">Awaiting review</span>
+                <a class="tui-link" href="#">Temporal UI ↗</a>
+              </div>
+            </header>
+            <main>
+              <ol class="stepper">
+                <li class="is-done"><span class="step-n">1</span><span class="step-label">Collect docs</span></li>
+                <li class="is-done"><span class="step-n">2</span><span class="step-label">Extract</span></li>
+                <li class="is-current"><span class="step-n">3</span><span class="step-label">KYC review</span></li>
+                <li><span class="step-n">4</span><span class="step-label">Open account</span></li>
+                <li><span class="step-n">5</span><span class="step-label">Client ID</span></li>
+                <li><span class="step-n">6</span><span class="step-label">Send docs</span></li>
+                <li><span class="step-n">7</span><span class="step-label">Notify</span></li>
+              </ol>
+
+              <section class="panel detail">
+                <div class="detail-head">
+                  <span class="detail-title">Waiting on KYC review</span>
+                  <span class="eyebrow">Step 3 of 7</span>
+                </div>
+                <div class="detail-note">
+                  The workflow is sleeping on a durable timer. It will remind at 24h and
+                  escalate at 72h — and it will never approve on its own.
+                </div>
+                <div class="facts">
+                  <div><div class="fact-k">Extraction attempts</div><div class="fact-v">1</div></div>
+                  <div><div class="fact-k">Fields extracted</div><div class="fact-v is-done">28</div></div>
+                  <div><div class="fact-k">Gaps</div><div class="fact-v is-alert">1</div></div>
+                  <div><div class="fact-k">Waiting</div><div class="fact-v">4h 12m</div></div>
+                </div>
+              </section>
+
+              <section class="panel review">
+                <div class="review-head">
+                  <h2>Review &amp; approve</h2>
+                  <span class="pill is-waiting">Open</span>
+                  <span class="review-who">KYC / AML Analyst</span>
+                </div>
+                <div class="gaps">
+                  <div class="gaps-title">1 field needs you</div>
+                  <div class="gaps-sub">The agent searched every document and could not find it.</div>
+                  <div class="gap">
+                    <div>
+                      <span class="gap-label">Date of birth</span>
+                      <code class="gap-path">beneficial_owners[1].dob</code>
+                    </div>
+                    <div class="gap-reason">
+                      Not present in any provided document. The ownership schedule names
+                      M. Chen at 30% but carries no date of birth.
+                    </div>
+                    <div class="gap-docs">
+                      <span class="eyebrow">Searched</span>
+                      <span class="chip">passport-mchen.pdf</span>
+                      <span class="chip">articles-of-incorporation.pdf</span>
+                      <span class="chip">ownership-schedule.pdf</span>
+                    </div>
+                    <input type="text" placeholder="YYYY-MM-DD" aria-label="Date of birth">
+                  </div>
+                </div>
+                <details class="verified">
+                  <summary><b>28</b> fields extracted &amp; verified</summary>
+                  <div class="grp">
+                    <h3>Business</h3>
+                    <table class="fields">
+                      <tr><th>Legal name</th><td class="val" tabindex="0">Acme Holdings LLC</td></tr>
+                      <tr><th>Tax ID</th><td class="val" tabindex="0">47-2831994</td></tr>
+                      <tr><th>Entity type</th><td class="val" tabindex="0">Limited liability company</td></tr>
+                    </table>
+                  </div>
+                </details>
+                <div class="review-actions">
+                  <label class="attest"><input type="checkbox"> I attest this application is accurate</label>
+                  <span class="spacer"></span>
+                  <button class="btn quiet">Reject</button>
+                  <button class="btn go" disabled>Approve</button>
+                </div>
+              </section>
+
+              <div class="cols">
+                <section class="panel">
+                  <div class="card-head"><span class="eyebrow">Actions</span></div>
+                  <div class="card-body">
+                    <div class="action">
+                      <div class="txt">
+                        <div class="who">Onboarding Specialist</div>
+                        <div class="sub">Starts the workflow for the client key.</div>
+                      </div>
+                      <button class="btn primary" disabled>Submit</button>
+                    </div>
+                    <div class="action">
+                      <div class="txt">
+                        <div class="who">Core banking</div>
+                        <div class="sub">Available once the account is open.</div>
+                      </div>
+                      <button class="btn" disabled>Return client ID</button>
+                    </div>
+                  </div>
+                </section>
+                <section class="panel">
+                  <div class="card-head"><span class="eyebrow">Demo controls</span></div>
+                  <div class="card-body">
+                    <label class="toggle">
+                      <input type="checkbox" checked>
+                      <div><div class="t">Slow first call</div><div class="sub">Core times out after succeeding.</div></div>
+                    </label>
+                    <label class="toggle">
+                      <input type="checkbox">
+                      <div><div class="t">LLM outage</div><div class="sub">Extraction fails and retries.</div></div>
+                    </label>
+                  </div>
+                </section>
+              </div>
+              <div class="footnote">Polling <code>status</code> every 2s · queries are not recorded in history.</div>
+            </main>
+          </div>
+        </div>
+      </div>
+
+      <div class="frame-wrap">
+        <div class="frame-label"><span class="dot d"></span> Dark — <code>prefers-color-scheme</code></div>
+        <div class="frame">
+          <div class="console" data-scheme="dark">
+            <header class="topbar">
+              <div class="brand">
+                <span class="mark">CB</span>
+                <div>
+                  <div class="brand-name">Commercial Banking</div>
+                  <div class="brand-sub">Client onboarding</div>
+                </div>
+              </div>
+              <div class="client">
+                <div class="client-name">Acme Holdings LLC</div>
+                <div class="client-meta"><code>onboarding-acme-corp</code></div>
+              </div>
+              <div class="topbar-right">
+                <span class="pill is-waiting">Awaiting review</span>
+                <a class="tui-link" href="#">Temporal UI ↗</a>
+              </div>
+            </header>
+            <main>
+              <ol class="stepper">
+                <li class="is-done"><span class="step-n">1</span><span class="step-label">Collect docs</span></li>
+                <li class="is-done"><span class="step-n">2</span><span class="step-label">Extract</span></li>
+                <li class="is-current"><span class="step-n">3</span><span class="step-label">KYC review</span></li>
+                <li><span class="step-n">4</span><span class="step-label">Open account</span></li>
+                <li><span class="step-n">5</span><span class="step-label">Client ID</span></li>
+                <li><span class="step-n">6</span><span class="step-label">Send docs</span></li>
+                <li><span class="step-n">7</span><span class="step-label">Notify</span></li>
+              </ol>
+
+              <section class="panel detail">
+                <div class="detail-head">
+                  <span class="detail-title">Waiting on KYC review</span>
+                  <span class="eyebrow">Step 3 of 7</span>
+                </div>
+                <div class="detail-note">
+                  The workflow is sleeping on a durable timer. It will remind at 24h and
+                  escalate at 72h — and it will never approve on its own.
+                </div>
+                <div class="facts">
+                  <div><div class="fact-k">Extraction attempts</div><div class="fact-v">1</div></div>
+                  <div><div class="fact-k">Fields extracted</div><div class="fact-v is-done">28</div></div>
+                  <div><div class="fact-k">Gaps</div><div class="fact-v is-alert">1</div></div>
+                  <div><div class="fact-k">Waiting</div><div class="fact-v">4h 12m</div></div>
+                </div>
+              </section>
+
+              <section class="panel review">
+                <div class="review-head">
+                  <h2>Review &amp; approve</h2>
+                  <span class="pill is-waiting">Open</span>
+                  <span class="review-who">KYC / AML Analyst</span>
+                </div>
+                <div class="gaps">
+                  <div class="gaps-title">1 field needs you</div>
+                  <div class="gaps-sub">The agent searched every document and could not find it.</div>
+                  <div class="gap">
+                    <div>
+                      <span class="gap-label">Date of birth</span>
+                      <code class="gap-path">beneficial_owners[1].dob</code>
+                    </div>
+                    <div class="gap-reason">
+                      Not present in any provided document. The ownership schedule names
+                      M. Chen at 30% but carries no date of birth.
+                    </div>
+                    <div class="gap-docs">
+                      <span class="eyebrow">Searched</span>
+                      <span class="chip">passport-mchen.pdf</span>
+                      <span class="chip">articles-of-incorporation.pdf</span>
+                      <span class="chip">ownership-schedule.pdf</span>
+                    </div>
+                    <input type="text" placeholder="YYYY-MM-DD" aria-label="Date of birth">
+                  </div>
+                </div>
+                <details class="verified">
+                  <summary><b>28</b> fields extracted &amp; verified</summary>
+                  <div class="grp">
+                    <h3>Business</h3>
+                    <table class="fields">
+                      <tr><th>Legal name</th><td class="val" tabindex="0">Acme Holdings LLC</td></tr>
+                      <tr><th>Tax ID</th><td class="val" tabindex="0">47-2831994</td></tr>
+                      <tr><th>Entity type</th><td class="val" tabindex="0">Limited liability company</td></tr>
+                    </table>
+                  </div>
+                </details>
+                <div class="review-actions">
+                  <label class="attest"><input type="checkbox"> I attest this application is accurate</label>
+                  <span class="spacer"></span>
+                  <button class="btn quiet">Reject</button>
+                  <button class="btn go" disabled>Approve</button>
+                </div>
+              </section>
+
+              <div class="cols">
+                <section class="panel">
+                  <div class="card-head"><span class="eyebrow">Actions</span></div>
+                  <div class="card-body">
+                    <div class="action">
+                      <div class="txt">
+                        <div class="who">Onboarding Specialist</div>
+                        <div class="sub">Starts the workflow for the client key.</div>
+                      </div>
+                      <button class="btn primary" disabled>Submit</button>
+                    </div>
+                    <div class="action">
+                      <div class="txt">
+                        <div class="who">Core banking</div>
+                        <div class="sub">Available once the account is open.</div>
+                      </div>
+                      <button class="btn" disabled>Return client ID</button>
+                    </div>
+                  </div>
+                </section>
+                <section class="panel">
+                  <div class="card-head"><span class="eyebrow">Demo controls</span></div>
+                  <div class="card-body">
+                    <label class="toggle">
+                      <input type="checkbox" checked>
+                      <div><div class="t">Slow first call</div><div class="sub">Core times out after succeeding.</div></div>
+                    </label>
+                    <label class="toggle">
+                      <input type="checkbox">
+                      <div><div class="t">LLM outage</div><div class="sub">Extraction fails and retries.</div></div>
+                    </label>
+                  </div>
+                </section>
+              </div>
+              <div class="footnote">Polling <code>status</code> every 2s · queries are not recorded in history.</div>
+            </main>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>The system underneath</h2>
+    <div class="spec-grid">
+
+      <div class="card">
+        <h3>Type scale — six sizes, was thirteen</h3>
+        <div class="scale-row"><span class="tok">--fs-display</span><span class="px">21</span><span class="sample" style="font-size:21px;font-weight:600">Waiting on KYC review</span></div>
+        <div class="scale-row"><span class="tok">--fs-title</span><span class="px">17</span><span class="sample" style="font-size:17px;font-weight:600">Review &amp; approve</span></div>
+        <div class="scale-row"><span class="tok">--fs-body</span><span class="px">15</span><span class="sample" style="font-size:15px;font-weight:500">1 field needs you</span></div>
+        <div class="scale-row"><span class="tok">--fs-ui</span><span class="px">14</span><span class="sample" style="font-size:14px;font-weight:500">Acme Holdings LLC</span></div>
+        <div class="scale-row"><span class="tok">--fs-meta</span><span class="px">13</span><span class="sample" style="font-size:13px;font-weight:500">Not present in any document</span></div>
+        <div class="scale-row"><span class="tok">--fs-eyebrow</span><span class="px">11</span><span class="sample" style="font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Searched</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Weights — three, was eight</h3>
+        <div class="scale-row"><span class="tok">500</span><span class="px">body</span><span class="sample" style="font-weight:500">The workflow is sleeping on a durable timer.</span></div>
+        <div class="scale-row"><span class="tok">600</span><span class="px">heads</span><span class="sample" style="font-weight:600">Waiting on KYC review</span></div>
+        <div class="scale-row"><span class="tok">700</span><span class="px">nums</span><span class="sample" style="font-weight:700;font-variant-numeric:tabular-nums">28 · 1 · 4h 12m</span></div>
+        <p class="sec-note" style="margin-top:14px;font-size:13.5px">
+          520, 560, 620, 640 and 680 are gone. On the <code>ui-sans-serif</code> stack
+          they resolved to the same three faces anyway — five of the eight
+          existed only in the stylesheet.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Spacing — 4px grid</h3>
+        <div class="grid-demo">
+          <div class="grid-col"><div class="bar" style="height:8px"></div><div class="cap">4</div></div>
+          <div class="grid-col"><div class="bar" style="height:16px"></div><div class="cap">8</div></div>
+          <div class="grid-col"><div class="bar" style="height:24px"></div><div class="cap">12</div></div>
+          <div class="grid-col"><div class="bar" style="height:32px"></div><div class="cap">16</div></div>
+          <div class="grid-col"><div class="bar" style="height:40px"></div><div class="cap">20</div></div>
+          <div class="grid-col"><div class="bar" style="height:48px"></div><div class="cap">24</div></div>
+          <div class="grid-col"><div class="bar" style="height:56px"></div><div class="cap">28</div></div>
+          <div class="grid-col"><div class="bar" style="height:64px"></div><div class="cap">32</div></div>
+        </div>
+        <p class="sec-note" style="margin-top:16px;font-size:13.5px">
+          31 distinct off-grid values today — 3, 5, 6, 7, 9, 11, 13, 18, 22, 26, 34.
+          Each rounds to the nearest multiple of 4, ties up.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>State colours — light / dark</h3>
+        <div class="swatches">
+          <div class="sw"><div class="chipbar"><i style="background:#2a4b9b"></i><i style="background:#7fa3ff"></i></div><div class="lbl">--accent</div></div>
+          <div class="sw"><div class="chipbar"><i style="background:#16755a"></i><i style="background:#4ac79b"></i></div><div class="lbl">--done</div></div>
+          <div class="sw"><div class="chipbar"><i style="background:#a1620a"></i><i style="background:#e8ad4a"></i></div><div class="lbl">--wait</div></div>
+          <div class="sw"><div class="chipbar"><i style="background:#ab2020"></i><i style="background:#ff7b72"></i></div><div class="lbl">--alert</div></div>
+        </div>
+        <p class="sec-note" style="margin-top:16px;font-size:13.5px">
+          Not <code>--success</code> / <code>--warning</code> / <code>--error</code>, which is what the sibling
+          repos use. A durable wait at the KYC gate is the <em>expected</em> path,
+          often for days — calling it a warning would contradict the demo at the
+          moment it is making its point.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>What changes, precisely</h2>
+    <div class="card scroll">
+      <table class="diff">
+        <tr><th>Thing</th><th>Today</th><th>§13.1</th></tr>
+        <tr><td>Font sizes</td><td class="was">13 (incl. 11.5, 12.5, 13.5, 14.5, 15.5)</td><td class="now">6</td></tr>
+        <tr><td>Font weights</td><td class="was">8 (500…700)</td><td class="now">3</td></tr>
+        <tr><td>Body weight</td><td class="was">400 (undeclared)</td><td class="now">500</td></tr>
+        <tr><td>Spacing values</td><td class="was">31 off a 4px grid</td><td class="now">0</td></tr>
+        <tr><td>Breakpoints</td><td class="was">900px and 860px</td><td class="now">900px</td></tr>
+        <tr><td>Stepper below 900px</td><td class="was">4 + orphan row of 3</td><td class="now">7, scrolls</td></tr>
+        <tr><td>Focus rings</td><td class="was">1 element</td><td class="now">7 elements</td></tr>
+        <tr><td>font-feature-settings</td><td class="was">cv05, ss01 (inert)</td><td class="now">removed</td></tr>
+        <tr><td>Token names</td><td class="was">--bg, --ink, --muted, --line-2</td><td class="now">--surface-0, --text-1, --text-2, --border-strong</td></tr>
+        <tr><td>Palette values</td><td class="was">—</td><td class="now">unchanged</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    Mockup for Task 22, Step 1. Not committed to the repo — the real page stays
+    <code>web/static/index.html</code> until this is approved. Spec:
+    §13.1 of <code>docs/superpowers/specs/2026-09-04-customer-onboarding-design.md</code>.
+  </footer>
+
+</div>

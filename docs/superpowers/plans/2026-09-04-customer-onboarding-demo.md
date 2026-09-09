@@ -5233,18 +5233,28 @@ from 20 behaviours to 28.
 - Consumes: nothing
 - Produces: nothing other tasks import
 
-- [ ] **Step 1: Build the mockup and get it approved before touching the console**
+- [ ] **Step 1: Re-read the approved mockup before touching the console**
 
-§13.1 was written from reading CSS. Nobody has seen it rendered. Build a
-throwaway page that shows the review gate in its escalation state — the
-`beneficial_owners[1].dob` gap — styled to §13.1, and get explicit approval
-before editing `web/static/index.html`.
+§13.1 was written from reading CSS, so a mockup was built and approved before
+this task existed. It lives in [`docs/design/`](../../design/) — two
+screenshots and the page they were shot from, showing the review gate in its
+escalation state with the `beneficial_owners[1].dob` gap.
 
-Write it to the scratchpad, **not** the repo. Publish it as an Artifact so it
-can be opened in a browser and reviewed in both themes.
+**Lift the `<style>` block from `docs/design/console-13-1-mockup.html`** rather
+than deriving §13.1 a second time. It already implements the six sizes, three
+weights, 4px grid, `--radius-sm` and the focus rings. Two differences are
+deliberate and must be undone on the way in: its tokens are scoped to
+`.console[data-scheme=…]` and hardcoded so both themes can sit side by side —
+the real page uses `@media (prefers-color-scheme: dark)` — and every selector
+carries a `.console` prefix that the real page does not need.
 
-Two consequences of §13.1 that only show up rendered, and that the reviewer
-must be asked about directly:
+If §13.1 has changed since the mockup was shot, re-shoot it first (the command
+is in `docs/design/README.md`) and get the change approved. A stale mockup
+reads as approved when it is not.
+
+Two consequences of §13.1 that only show up rendered, both already flagged on
+the mockup and accepted at first pass — re-confirm them against the
+screenshots before proceeding:
 
 1. **Body copy gets heavier.** `body` currently declares no `font-weight`, so
    unstyled text renders at 400. §13.1's three weights are 500/600/700, so
