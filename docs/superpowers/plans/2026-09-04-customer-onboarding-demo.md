@@ -5206,7 +5206,529 @@ random() call is introduced, then reverted."
 
 ---
 
-### Task 21: Final verification and the README — TAIL, sequential
+### Task 22: The console's visual system — TAIL, runs BEFORE Task 21
+
+§13.1. The number is a label, not a position — the same way Task 4 is labelled
+`SCHEDULE FIRST`. This task runs **before** Task 21, because Task 21 walks the
+console by hand and writes the README against what it sees.
+
+§13 deferred visual design and that pass never ran. Tasks 8, 11 and 18 each
+added CSS in passing, producing a coherent palette and no system: thirteen
+font sizes, eight font weights, no spacing unit, and two breakpoints that
+disagree. §13.1 ratifies the palette and fixes everything else.
+
+**This task adds no manifest scenarios.** The §16.8 manifest is complete at 22
+and `make verify` prints that count as a literal string. Do **not** invent
+`T-CONSOLE-*` IDs — these are ordinary tests. `tests/test_console.py` grows
+from 20 behaviours to 28.
+
+**Files:**
+- Modify: `web/static/index.html` — the `<style>` block only (284 of 947 lines).
+  No markup or JavaScript changes; the existing 20 tests must keep passing
+  untouched.
+- Test: `tests/test_console.py` — append eight tests
+- Modify: `.claude/rules/testing.md` — correct the browser path (see Step 14)
+
+**Interfaces:**
+- Consumes: nothing
+- Produces: nothing other tasks import
+
+- [ ] **Step 1: Build the mockup and get it approved before touching the console**
+
+§13.1 was written from reading CSS. Nobody has seen it rendered. Build a
+throwaway page that shows the review gate in its escalation state — the
+`beneficial_owners[1].dob` gap — styled to §13.1, and get explicit approval
+before editing `web/static/index.html`.
+
+Write it to the scratchpad, **not** the repo. Publish it as an Artifact so it
+can be opened in a browser and reviewed in both themes.
+
+Two consequences of §13.1 that only show up rendered, and that the reviewer
+must be asked about directly:
+
+1. **Body copy gets heavier.** `body` currently declares no `font-weight`, so
+   unstyled text renders at 400. §13.1's three weights are 500/600/700, so
+   `body` now declares 500 and every paragraph, note and table cell gains a
+   step. Intended — §13.1's first principle is "scanned, not read" — but it is
+   the single most visible change in the task.
+2. **`.detail-title` grows from 19px to 21px**, matching `.client-name`. The
+   six-size scale has no 19px step.
+
+If either is wrong, amend §13.1 **first** and re-run this step. Per R-029 a
+task cannot overrule the spec.
+
+- [ ] **Step 2: Write the failing tests**
+
+```python
+# tests/test_console.py — append to the existing file
+import re
+
+TYPE_SCALE = {"11px", "13px", "14px", "15px", "17px", "21px"}
+WEIGHTS = {"500", "600", "700"}
+
+TOKENS_REQUIRED = (
+    "--surface-0:", "--surface-1:", "--surface-2:",
+    "--text-1:", "--text-2:",
+    "--border:", "--border-strong:",
+    "--accent:", "--accent-ink:", "--accent-wash:",
+    "--done:", "--done-wash:", "--wait:", "--wait-wash:",
+    "--alert:", "--alert-wash:",
+    "--control-bg:", "--control-hover:", "--focus-ring:",
+    "--fs-eyebrow:", "--fs-meta:", "--fs-ui:",
+    "--fs-body:", "--fs-title:", "--fs-display:",
+    "--sp-1:", "--sp-2:", "--sp-3:", "--sp-4:",
+    "--sp-5:", "--sp-6:", "--sp-7:", "--sp-8:",
+    "--radius:", "--radius-sm:",
+)
+
+# Each carries its colon so it cannot match its own replacement:
+# "--surface:" must not match "--surface-0:".
+TOKENS_RETIRED = (
+    "--bg:", "--surface:", "--ink:", "--muted:", "--line:", "--line-2:",
+    "--accent-in:", "--accent-bg:",
+    "--done-bg:", "--wait-bg:", "--alert-bg:",
+)
+
+FOCUSABLE = (
+    ".btn", ".tui-link", ".gap input[type=text]",
+    "input.cell-edit", ".attest input", ".toggle input", "td.val",
+)
+
+
+def css() -> str:
+    """The inline <style> block. §13 forbids external stylesheets, so this is
+    the whole visual system."""
+    m = re.search(r"<style>(.*?)</style>", PAGE.read_text(), re.S)
+    assert m, "the page must carry exactly one inline <style> block"
+    return m.group(1)
+
+
+def test_the_type_scale_is_six_sizes():
+    """§13.1.2 — thirteen sizes collapse to six. The half-pixel steps were
+    never distinguishable at projector distance. `code` keeps a relative
+    `em` size and is deliberately not on the px scale."""
+    used = set(re.findall(r"font-size:\s*([\d.]+px)", css()))
+    assert used <= TYPE_SCALE, f"off-scale sizes: {sorted(used - TYPE_SCALE)}"
+
+
+def test_there_are_three_font_weights():
+    """§13.1.2 — eight collapse to three. `ui-sans-serif` resolves to a
+    non-variable system face on most machines, so 520 and 560 rendered
+    identically to 500; five of the eight existed only in the stylesheet."""
+    used = set(re.findall(r"font-weight:\s*(\d+)", css()))
+    assert used <= WEIGHTS, f"off-scale weights: {sorted(used - WEIGHTS)}"
+
+
+def test_the_inert_font_feature_settings_is_gone():
+    """§13.1.2 — copied from canonical-ai-demo, whose stack leads with Inter
+    where cv05/ss01 exist. Ours leads with ui-sans-serif, so it never did
+    anything."""
+    assert "font-feature-settings" not in css()
+
+
+def test_spacing_is_a_four_pixel_grid():
+    """§13.1.3. Scoped to padding/margin/gap: component dimensions like the
+    34px brand mark and the 17px checkbox are sizes, not spacing."""
+    off = []
+    pattern = r"\b(padding|margin|gap|row-gap|column-gap)(?:-(?:top|right|bottom|left))?:\s*([^;}\n]+)"
+    for prop, value in re.findall(pattern, css()):
+        for px in re.findall(r"([\d.]+)px", value):
+            if float(px) % 4:
+                off.append(f"{prop}: {px}px")
+    assert not off, f"off-grid spacing: {sorted(set(off))}"
+
+
+def test_there_is_exactly_one_breakpoint():
+    """§13.1.4 — the 900px/860px disagreement had no reason behind it."""
+    widths = set(re.findall(r"@media[^{]*max-width:\s*(\d+px)", css()))
+    assert widths == {"900px"}, f"breakpoints: {sorted(widths)}"
+
+
+def test_the_stepper_scrolls_rather_than_wrapping():
+    """§13.1.4 — collapsing seven columns to four leaves an orphan row of
+    three and destroys the one thing the stepper shows: position within a
+    seven-step whole (§12)."""
+    c = css().replace(" ", "")
+    assert "repeat(4," not in c, "the 7->4 collapse is back"
+    assert "minmax(96px" in c
+    assert "overflow-x:auto" in c
+
+
+def test_focus_visible_on_every_interactive_element():
+    """§13.1.5 — only .gap input had a focus ring, which made the review gate
+    unusable by keyboard. Grouped selectors satisfy this: each substring is
+    present either way."""
+    c = css()
+    missing = [s for s in FOCUSABLE if f"{s}:focus-visible" not in c]
+    assert not missing, f"no focus ring: {missing}"
+
+
+def test_tokens_follow_the_sibling_convention():
+    """§13.1.1 — names from temporal-agent-harness, values ours and
+    unchanged. Every old name must be gone, or a stale var() reference
+    silently falls back to nothing."""
+    c = css()
+    assert [t for t in TOKENS_REQUIRED if t not in c] == []
+    assert [t for t in TOKENS_RETIRED if t in c] == []
+```
+
+- [ ] **Step 3: Run the new tests to verify they fail**
+
+Run: `uv run pytest tests/test_console.py -v`
+Expected: the 20 existing tests PASS; all 8 new tests FAIL. `test_the_type_scale_is_six_sizes` should report the off-scale set `['11.5px', '12px', '12.5px', '13.5px', '14.5px', '15.5px', '19px']`.
+
+- [ ] **Step 4: Replace both `:root` blocks wholesale**
+
+Values are unchanged from what Tasks 8/11/18 produced. Only the names change,
+plus five genuinely new tokens (`--focus-ring`, `--control-bg`,
+`--control-hover`, `--radius-sm`, and the scale tokens).
+
+```css
+:root {
+  color-scheme: light;
+  --surface-0: #f4f2ee;
+  --surface-1: #ffffff;
+  --surface-2: #faf9f6;
+  --text-1:    #14161b;
+  --text-2:    #5d6472;
+  --border:        #e3e0d8;
+  --border-strong: #cfcbc0;
+  --accent:      #2a4b9b;
+  --accent-ink:  #ffffff;
+  --accent-wash: #eaeffb;
+  --done:       #16755a;
+  --done-wash:  #e6f3ee;
+  --wait:       #a1620a;
+  --wait-wash:  #fbf1e0;
+  --alert:      #ab2020;
+  --alert-wash: #fbebe9;
+  --control-bg:    #ffffff;
+  --control-hover: #f4f2ee;
+  --focus-ring: color-mix(in srgb, var(--accent) 40%, transparent);
+  --fs-eyebrow: 11px;
+  --fs-meta:    13px;
+  --fs-ui:      14px;
+  --fs-body:    15px;
+  --fs-title:   17px;
+  --fs-display: 21px;
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 28px; --sp-8: 32px;
+  --radius:    10px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(20,22,27,.06), 0 6px 20px rgba(20,22,27,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surface-0: #0e1014;
+    --surface-1: #171a20;
+    --surface-2: #1d212a;
+    --text-1:    #eef0f4;
+    --text-2:    #99a1b2;
+    --border:        #272c36;
+    --border-strong: #38404e;
+    --accent:      #7fa3ff;
+    --accent-ink:  #0e1014;
+    --accent-wash: #1b2436;
+    --done:       #4ac79b;
+    --done-wash:  #142b25;
+    --wait:       #e8ad4a;
+    --wait-wash:  #2c2415;
+    --alert:      #ff7b72;
+    --alert-wash: #2e1a1a;
+    --control-bg:    #0f1318;
+    --control-hover: #18202a;
+    --focus-ring: color-mix(in srgb, var(--accent) 45%, transparent);
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+```
+
+The type and spacing tokens are theme-independent and are declared once, in
+the light block only.
+
+- [ ] **Step 5: Rewrite every `var()` reference, longest name first**
+
+**Order matters and naive `sed` corrupts this.** `s/--surface/--surface-1/g`
+turns `--surface-2` into `--surface-1-2`, and `s/--line/--border/g` turns
+`--line-2` into `--border-2`. Use lookaheads:
+
+```bash
+perl -0pi -e '
+  s/--accent-bg\b/--accent-wash/g;
+  s/--done-bg\b/--done-wash/g;
+  s/--wait-bg\b/--wait-wash/g;
+  s/--alert-bg\b/--alert-wash/g;
+  s/--accent-in\b/--accent-ink/g;
+  s/--surface(?!-)/--surface-1/g;
+  s/--line(?!-)/--border/g;
+  s/--line-2\b/--border-strong/g;
+  s/--bg\b/--surface-0/g;
+  s/--ink\b/--text-1/g;
+  s/--muted\b/--text-2/g;
+' web/static/index.html
+```
+
+`--bg` cannot collide with `--accent-bg` because that name has one hyphen
+before `bg`, not two — and the `-bg` renames run first regardless.
+
+One reference is easy to miss because it carries a fallback:
+`table.fields td.val:hover` uses `var(--accent-bg, rgba(0,0,0,.04))`. The
+`--accent-bg` rename above catches it; the fallback stays.
+
+- [ ] **Step 6: Run the token test**
+
+Run: `uv run pytest tests/test_console.py::test_tokens_follow_the_sibling_convention -v`
+Expected: PASS. The other seven new tests still fail.
+
+- [ ] **Step 7: Apply the type scale and the three weights**
+
+Replace every `font-size: Npx` with the token, using this mapping:
+
+| Old | Token | Old | Token |
+|-----|-------|-----|-------|
+| 11, 11.5, 12 | `var(--fs-eyebrow)` | 14.5, 15, 15.5 | `var(--fs-body)` |
+| 12.5, 13 | `var(--fs-meta)` | 17 | `var(--fs-title)` |
+| 13.5, 14 | `var(--fs-ui)` | 19, 21 | `var(--fs-display)` |
+
+Weights: 520 and 560 become **500**; 620, 640 and 680 become **600**; 600 and
+700 are unchanged.
+
+Split the `body` shorthand, which currently hides the size inside `font:` and
+leaves the weight undeclared at 400:
+
+```css
+body {
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  font-weight: 500;
+}
+```
+
+Delete the `font-feature-settings` line. Leave `code, .mono`'s `font-size:
+.86em` alone — it is deliberately relative.
+
+- [ ] **Step 8: Run the type tests**
+
+Run: `uv run pytest tests/test_console.py -k "type_scale or font_weights or font_feature" -v`
+Expected: 3 PASS.
+
+- [ ] **Step 9: Put every padding, margin and gap on the 4px grid**
+
+Round each to the nearest multiple of 4; on an exact tie (`n % 4 == 2`), round
+**up**. So 3→4, 5→4, 6→8, 7→8, 9→8, 10→12, 11→12, 13→12, 14→16, 18→20, 22→24,
+26→28, 34→36. Multiples of 4 are already correct.
+
+Worked examples:
+- `.pill { padding: 6px 14px 6px 11px }` → `padding: 8px 16px 8px 12px`
+- `.verified { padding: 4px 22px 6px }` → `padding: 4px 24px 8px`
+- `.facts { gap: 10px 34px }` → `gap: 12px 36px`
+- `.stepper { margin: 0 0 22px }` → `margin: 0 0 24px`
+
+Prefer the `--sp-*` token where one matches exactly; a literal is acceptable
+where it does not. `width`, `height`, `inset` and `top` are **not** spacing and
+stay as they are.
+
+**Radius, in the same pass** (§13.1.3). `--radius-sm` is declared in Step 4 and
+nothing uses it yet — an unused token is a lie about the system. Every
+`border-radius: 8px` becomes `var(--radius-sm)`: `.stepper li`, `.btn`, `.gap`,
+`.errline`, `.mark`. `.panel` keeps `var(--radius)` at 10px. The pill and chip
+`999px` values are capsules, not radii on the scale, and stay literal. The
+stragglers at 4px, 5px and 7px (`td.val`, `input.cell-edit`, `.gap input`) all
+become `var(--radius-sm)` so controls agree with each other.
+
+- [ ] **Step 10: Run the spacing test**
+
+Run: `uv run pytest tests/test_console.py::test_spacing_is_a_four_pixel_grid -v`
+Expected: PASS. If it fails, the message names each offender.
+
+- [ ] **Step 11: One breakpoint, and make the stepper scroll**
+
+Delete `@media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }`
+and fold `.cols` into the 900px query. Replace the stepper's column collapse:
+
+```css
+.stepper {
+  list-style: none; margin: 0 0 24px; padding: 0;
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px;
+}
+@media (max-width: 900px) {
+  .cols { grid-template-columns: 1fr; }
+  .stepper {
+    grid-template-columns: repeat(7, minmax(96px, 1fr));
+    overflow-x: auto;
+    scrollbar-width: thin;
+    padding-bottom: 4px;
+  }
+}
+```
+
+Seven columns stay seven. `repeat(4, 1fr)` must not survive anywhere.
+
+- [ ] **Step 12: Add `:focus-visible` to every interactive element**
+
+`--focus-ring` exists but nothing uses it yet. Only `.gap input[type=text]`
+has any focus treatment today, which is why the review gate cannot be operated
+by keyboard.
+
+```css
+.btn:focus-visible,
+.tui-link:focus-visible,
+.gap input[type=text]:focus-visible,
+input.cell-edit:focus-visible,
+.attest input:focus-visible,
+.toggle input:focus-visible,
+table.fields td.val:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+```
+
+Keep the existing `.gap input[type=text]:focus` rule or replace it with the
+grouped one — do not leave both fighting over `outline`.
+
+Extend the reduced-motion guard so it covers everything animated, not only the
+pill:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+```
+
+- [ ] **Step 13: Run the whole suite**
+
+Run: `uv run pytest tests/test_console.py -v`
+Expected: 28 passed. The 20 original tests must be untouched — if any of them
+changed, markup or JavaScript was edited and this task's scope was exceeded.
+
+Run: `make verify`
+Expected: `VERIFY OK: 22/22 scenarios implemented and passing`, 215 passed, 0 skipped.
+
+- [ ] **Step 14: Drive it in a real browser — R-022**
+
+All 28 tests above read the page as text. They pass against a page whose
+JavaScript throws and against a page that renders as unstyled HTML.
+
+**`.claude/rules/testing.md` points at `/opt/pw-browsers/`, which is a
+container path and does not exist on a Mac.** Use the installed browser via
+`channel="chrome"`, and correct the rule in this task's commit — name both
+paths so the next reader is not sent to a directory that is not there.
+
+```bash
+uv run --with playwright python - <<'PY'
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+
+OUT = Path("/tmp/console-shots"); OUT.mkdir(exist_ok=True)
+url = "file://" + str(Path("web/static/index.html").resolve())
+
+CONTRAST_JS = """(sel) => {
+  const lum = (c) => {
+    const [r, g, b] = c.match(/\\d+/g).slice(0, 3).map(Number).map((v) => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const el = document.querySelector(sel);
+  if (!el) return null;
+  let bg = getComputedStyle(el).backgroundColor, node = el;
+  while (bg === 'rgba(0, 0, 0, 0)' && node.parentElement) {
+    node = node.parentElement;
+    bg = getComputedStyle(node).backgroundColor;
+  }
+  const a = lum(getComputedStyle(el).color), b = lum(bg);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}"""
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(channel="chrome")
+    for scheme in ("light", "dark"):
+        for width, tag in ((1280, "wide"), (820, "narrow")):
+            page = browser.new_page(viewport={"width": width, "height": 900})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.on("console", lambda m: m.type == "error" and errors.append(m.text))
+            page.emulate_media(color_scheme=scheme)
+            page.goto(url)
+            page.wait_for_timeout(400)
+            assert not errors, f"{scheme}/{tag} page errors: {errors}"
+
+            # Contrast: §13.1.5 sets 4.5:1 minimum in BOTH themes. --text-2 on
+            # a panel is the pair most likely to fail, and the -wash fills are
+            # the ones nobody checks.
+            for sel in (".detail-note", ".client-meta", ".gap-reason", ".errline"):
+                ratio = page.evaluate(CONTRAST_JS, sel)
+                if ratio is None:
+                    continue
+                assert ratio >= 4.5, f"{scheme}/{tag} {sel}: {ratio:.2f}:1 < 4.5:1"
+
+            # The stepper keeps seven columns at every width
+            cols = page.evaluate(
+                "getComputedStyle(document.querySelector('.stepper'))"
+                ".gridTemplateColumns.split(' ').length")
+            assert cols == 7, f"{scheme}/{tag}: stepper has {cols} columns, not 7"
+
+            # Every focusable element actually paints a ring
+            for sel in (".btn", ".tui-link"):
+                el = page.query_selector(sel)
+                if not el:
+                    continue
+                el.focus()
+                outline = page.evaluate(
+                    "s => getComputedStyle(document.querySelector(s)).outlineWidth", sel)
+                assert outline not in ("0px", ""), f"{sel} has no focus ring ({outline})"
+
+            page.screenshot(path=str(OUT / f"console-{scheme}-{tag}.png"), full_page=True)
+            page.close()
+    browser.close()
+print("shots in", OUT)
+PY
+```
+
+Then **look at the four screenshots.** The tests cannot tell you whether the
+page looks right; that is the entire reason §13.1 exists. Check the two changes
+Step 1 flagged — heavier body copy, and `.detail-title` at 21px.
+
+- [ ] **Step 15: Commit**
+
+```bash
+git add web/static/index.html tests/test_console.py .claude/rules/testing.md
+git commit -m "feat: Task 22 — the console's visual system, per §13.1
+
+Ratifies the palette Tasks 8/11/18 produced and fixes what they had no
+system for: thirteen font sizes to six, eight weights to three, a 4px
+spacing grid, one breakpoint instead of two that disagreed, and
+:focus-visible on every interactive element -- only .gap input had one,
+which made the review gate unusable by keyboard.
+
+The stepper now scrolls instead of collapsing seven columns to four. That
+collapse left an orphan row of three and destroyed the only thing the
+stepper communicates: position within a seven-step whole (§12).
+
+Dropped font-feature-settings: \"cv05\", \"ss01\" -- lifted from
+canonical-ai-demo, whose stack leads with Inter where those variants
+exist. Ours leads with ui-sans-serif, so it never did anything.
+
+Eight new tests, all grep-level, plus a Chromium drive per R-022 because
+grep-level is exactly what cannot see a visual regression. Corrected
+testing.md's browser path: /opt/pw-browsers/ is a container path and is
+absent on macOS, so the rule sent local readers nowhere.
+
+Suite 215 passed, 0 skipped. Manifest untouched at 22/22 -- these are
+ordinary tests, not new scenarios."
+```
+
+---
+
+### Task 21: Final verification and the README — TAIL, sequential, runs AFTER Task 22
 
 **Files:**
 - Modify: `README.md` — a Setup section already exists; grow the README around

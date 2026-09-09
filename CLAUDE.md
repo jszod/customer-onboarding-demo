@@ -20,13 +20,12 @@ regression, not remaining work.
 
 1. **Task 21** — final verification and growing the README. The plan's last
    task; it consumes everything and produces nothing new.
-2. **The console's visual design** — **§13.1 is now written**; the code has not
-   caught up. The spec fixes a six-size type scale, three font weights, a 4px
-   spacing unit, sibling-convention token names, one breakpoint at 900px, a
-   scrolling stepper, and `:focus-visible` on everything. `web/static/index.html`
-   still carries the thirteen sizes and eight weights it accumulated across
-   Tasks 8, 11 and 18. **This is not yet a plan task** — spec → plan → code, so
-   it needs a task written before it is built.
+2. **Task 22** — the console's visual system. §13.1 is written and **Task 22 is
+   written**; the code has not caught up. `web/static/index.html` still carries
+   the thirteen font sizes and eight weights it accumulated across Tasks 8, 11
+   and 18. Task 22's Step 1 is a mockup that must be approved before any CSS
+   moves, because §13.1 was derived from reading the stylesheet rather than
+   looking at the page. **Task 22 runs before Task 21.**
 
 Constraints any visual pass inherits: `tests/test_console.py` pins 20
 behaviours, including light/dark adaptation and **no external scripts or
@@ -88,7 +87,7 @@ the CLI too.
 | Document | What it is |
 |----------|------------|
 | `docs/superpowers/specs/2026-09-04-customer-onboarding-design.md` | **The binding authority.** 22 sections. Settles everything. |
-| `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 21 tasks, 127 steps. How the spec gets built. |
+| `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 22 tasks, 142 steps. How the spec gets built. **Task 22 runs before Task 21** — the number is a label, not a position, as with Task 4's `SCHEDULE FIRST`. |
 | `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. R-014's deferred console work landed in Task 18 as R-022; no open questions remain. **R-021–R-023 were renumbered from R-017–R-019 when the Task 18 branch merged `main`** — two branches wrote those three numbers in parallel, and the commit messages still use the old ones. |
 | `docs/demo-brief.md` | 11 numbered decisions with the reasoning and the **rejected** alternatives. |
 | `docs/DEVELOPMENT-PROCESS.md` | The four-stage process this repo follows. |
