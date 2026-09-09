@@ -228,13 +228,13 @@ main { max-width: 1180px; margin: 0 auto; padding: var(--sp-7) var(--sp-7) 72px;
   font-size: var(--fs-eyebrow); padding: var(--sp-1) var(--sp-2); border-radius: 999px;
   background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-2);
 }
-.gap input[type=text] {
+.gap input {
   margin-top: var(--sp-3); width: 100%; max-width: 460px;
   padding: var(--sp-2) var(--sp-3); font: inherit; font-size: var(--fs-body);
   color: var(--text-1); background: var(--surface-2);
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
 }
-.gap input[type=text].is-empty { border-color: var(--alert); }
+.gap input.is-empty { border-color: var(--alert); }
 
 .verified { padding: var(--sp-1) var(--sp-6) var(--sp-2); }
 .verified summary {
@@ -334,7 +334,7 @@ input.cell-edit {
    plain mouse click -- the exact behaviour :focus-visible exists to suppress. */
 .btn:focus-visible,
 .tui-link:focus-visible,
-.gap input[type=text]:focus-visible,
+.gap input:focus-visible,
 input.cell-edit:focus-visible,
 .attest input:focus-visible,
 .toggle input:focus-visible,
@@ -542,6 +542,31 @@ function humanPath(path) {
   return head ? head + " — " + tail : tail;
 }
 
+/* Four of the 22 required paths are not strings (§5.1): three dates and one
+   Decimal. A bare text box asks for a typed value and states no format, so a
+   date of birth invites "04/15/1962" — which apply_edits refuses, and rightly:
+   guessing MM/DD against DD/MM on a DOB is worse than refusing. `type=date`
+   renders in the analyst's own locale and always hands back ISO, so the
+   ambiguity never reaches the workflow. */
+const GAP_INPUT_TYPE = {
+  dob: "date", formation_date: "date", ownership_pct: "number",
+};
+function gapInputType(path) {
+  const leaf = String(path).split(".").pop().replace(/\[\d+\]$/, "");
+  return GAP_INPUT_TYPE[leaf] || "text";
+}
+function gapInput(g) {
+  const t = gapInputType(g.field_path);
+  /* A date or number control paints its own affordance; a placeholder would
+     only fight the browser's. Percentages are bounded by §5.1's <= 100 rule. */
+  const extra = t === "number" ? ' step="0.01" min="0" max="100"'
+              : t === "text"   ? ' placeholder="' + esc(humanPath(g.field_path)) + '"'
+              : "";
+  return '<input type="' + t + '" data-gap="' + esc(g.field_path) +
+         '" class="is-empty" autocomplete="off"' + extra +
+         ' value="' + esc(gapEdits[g.field_path] || "") + '">';
+}
+
 const DOC_LABEL = {
   articles_of_incorporation: "Articles of incorporation",
   business_license: "Business licence", ein_letter: "EIN letter",
@@ -717,9 +742,7 @@ function renderGaps(gaps) {
       '<div class="gap-reason">' + esc(g.reason) + "</div>" +
       '<div class="gap-docs"><span class="eyebrow">Searched</span>' +
       (docs || '<span class="chip">no documents</span>') + "</div>" +
-      '<input type="text" data-gap="' + esc(g.field_path) + '" class="is-empty" ' +
-      'autocomplete="off" placeholder="' + esc(humanPath(g.field_path)) +
-      '" value="' + esc(gapEdits[g.field_path] || "") + '">' +
+      gapInput(g) +
       "</div>";
   }).join("");
   for (const input of $("gaps-list").querySelectorAll("input[data-gap]")) {
@@ -786,7 +809,13 @@ $("verified-body").addEventListener("click", (ev) => {
   const before = Object.prototype.hasOwnProperty.call(corrections, path)
     ? corrections[path]
     : (cell.classList.contains("empty") ? "" : cell.textContent);
-  cell.innerHTML = '<input type="text" class="cell-edit" autocomplete="off">';
+  /* Same typing as the gap inputs. The table renders a date as the ISO string
+     the payload carries, so handing that straight to a date control is safe —
+     and without this, correcting a dob here reaches Pydantic as free text
+     exactly like an unfilled gap would. */
+  const cellType = gapInputType(path);
+  cell.innerHTML = '<input type="' + cellType + '" class="cell-edit" autocomplete="off"' +
+                   (cellType === "number" ? ' step="0.01" min="0" max="100"' : "") + ">";
   const input = cell.querySelector("input");
   input.value = before;
   input.focus();

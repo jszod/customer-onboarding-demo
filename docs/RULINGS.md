@@ -1676,3 +1676,50 @@ regression and watching it fail, because a guard nobody has seen fail is a
 guess. That takes the console suite to 31 and the whole suite to 218; the
 §16.8 manifest is untouched at 22, since these are ordinary tests and not
 scenarios.
+
+## R-034 — the console asked for a typed value through an untyped box
+
+**Found by running the demo, not by testing it.** At the KYC gate the analyst
+typed `04/15/1962` into the escalated `beneficial_owners[1].dob` and Approve
+came back with a raw Pydantic error, `pydantic.dev` URL and all.
+
+**The validator was right.** `apply_edits` deliberately leans on schema
+coercion — "re-validate so strings are coerced to dates/Decimals by the schema"
+— and Pydantic coerces ISO-8601 only. Refusing `04/15/1962` is the correct
+behaviour and should stay: silently guessing MM/DD against DD/MM **on a date of
+birth**, in a KYC file, is a worse outcome than a refusal. Leniency was
+considered and rejected on those grounds.
+
+**The defect was asking the question badly.** Four of the 22 required paths are
+not strings — `formation_date`, `beneficial_owners[].dob` and
+`control_person.dob` are `date`, `beneficial_owners[].ownership_pct` is
+`Decimal` — and the console rendered every gap as `<input type="text">` whose
+placeholder was the field's own label. It named a format nowhere. A US-format
+date is the single most likely thing a US bank analyst types into a DOB box.
+
+Fixed at the source: date-typed gaps render `type="date"`, which shows the
+analyst's own locale and always yields ISO in `.value`, so the ambiguity never
+reaches the workflow. `ownership_pct` gets `type="number"` bounded by §5.1's
+`<= 100`. No parsing, no guessing, no backend change.
+
+**The same bug lived twice.** R-021's inline table editor let the analyst
+correct *any* extracted field through a free-text `input.cell-edit` — so a dob
+corrected there hit the identical refusal. It now takes the same typing. The
+gap panel was the reported symptom; the table was the one nobody would have
+found until a customer did.
+
+**Two traps on the way, both the R-033 shape.** The CSS scoped the control as
+`.gap input[type=text]`, so the moment it became a date the rule stopped
+matching and the box silently lost its border, padding and focus ring —
+present, correct, not applying. And `type="date"` blanks itself if assigned a
+non-ISO value, which would have wiped every prefilled date in the table editor;
+it is safe only because `fmtValue` renders the payload's ISO string verbatim.
+Both were caught by driving Chrome, neither by a grep.
+
+Two tests added, one of them for the styling trap. The console suite is 33 and
+the whole suite 220; the §16.8 manifest is untouched at 22.
+
+**Left alone deliberately:** the raw Pydantic text in the error. With both
+input paths now emitting ISO it is unreachable through the UI, and the
+remaining trigger is the composite-path edit the code comment already
+anticipates. Worth trimming, not worth bundling into this fix.

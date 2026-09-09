@@ -215,7 +215,7 @@ TOKENS_RETIRED = (
 )
 
 FOCUSABLE = (
-    ".btn", ".tui-link", ".gap input[type=text]",
+    ".btn", ".tui-link", ".gap input",
     "input.cell-edit", ".attest input", ".toggle input", "td.val",
 )
 
@@ -342,3 +342,32 @@ def test_the_responsive_block_comes_after_the_rules_it_overrides():
     media = c.index("@media (max-width: 900px)")
     late = [s for s in (".cols {", ".stepper {") if c.index(s) > media]
     assert not late, f"declared after the 900px block, so it overrides it: {late}"
+
+
+def test_typed_gaps_get_a_typed_input():
+    """Four of the 22 required paths are not strings: `formation_date`,
+    `beneficial_owners[].dob` and `control_person.dob` are dates, and
+    `ownership_pct` is a Decimal (§5.1). Asked for through a bare text box that
+    states no format, a date of birth invites `04/15/1962` -- which `apply_edits`
+    refuses, correctly: guessing MM/DD against DD/MM on a DOB is worse than
+    refusing. `type=date` renders in the analyst's own locale and always hands
+    back ISO, so the ambiguity never arises."""
+    b = body()
+    for leaf, kind in (("dob", "date"), ("formation_date", "date"),
+                       ("ownership_pct", "number")):
+        assert re.search(rf'{leaf}:\s*"{kind}"', b), f"{leaf} has no typed input"
+    assert 'input type="text" data-gap=' not in b, \
+        "the gap input is still hardcoded to text"
+    assert 'input type="text" class="cell-edit"' not in b, \
+        "the inline table editor is still hardcoded to text — correcting an " \
+        "already-extracted dob there hits the same refusal as an unfilled gap"
+
+
+def test_the_gap_input_is_styled_by_type_agnostic_selectors():
+    """The moment a gap renders as type=date, `.gap input[type=text]` stops
+    matching it and the control silently loses its border, padding and focus
+    ring. Same class of failure as R-033: the rule is present, correct, and
+    simply does not apply."""
+    c = css()
+    assert "input[type=text]" not in c, \
+        "a type-scoped gap-input selector cannot style a date or number gap"
