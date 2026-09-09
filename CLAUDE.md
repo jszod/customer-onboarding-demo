@@ -6,7 +6,8 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–20 have landed. Task 21 is next — the last one.** Skeleton and
+**Plan Tasks 1–20 have landed. Task 22 is next, then Task 21 closes it out.**
+The number is a label, not a position — see the doc table below. Skeleton and
 config, models and `CONTRACT.md`, the 22-scenario manifest, the design
 artifact, sample documents, core banking, the gateway, the console, all four
 activities, the extraction child, the parent's loop and happy path, the
@@ -18,15 +19,16 @@ regression, not remaining work.
 
 **Two pieces of work remain, and only one of them is in the plan.**
 
-1. **Task 21** — final verification and growing the README. The plan's last
-   task; it consumes everything and produces nothing new.
-2. **The console's visual design** — §13 fixes the functional surface and ends
-   with "Visual design is Stage 3 work". That pass has never been run. What
-   exists is 284 lines of CSS written in passing across Tasks 8, 11 and 18, and
-   there is **no visual spec anywhere** — no palette, type scale, spacing,
-   wireframe or responsive rule. This is a real hole, not an oversight: §13
-   says so out loud. It is not a plan task, so it needs either a §13.1 in the
-   spec or a new task before it is built (see the spec-first order below).
+1. **Task 22** — the console's visual system, and it runs **first**. §13.1 is
+   written, Task 22 is written, and the approved mockup is shot into
+   `docs/design/` — the code is what has not caught up.
+   `web/static/index.html` still carries the thirteen font sizes and eight
+   weights it accumulated across Tasks 8, 11 and 18. Step 1 is to re-read the
+   mockup, not to build one.
+2. **Task 21** — final verification and growing the README. The plan's last
+   task; it consumes everything and produces nothing new. It runs **after**
+   Task 22, because it walks the console by hand and writes the README against
+   what it sees.
 
 Constraints any visual pass inherits: `tests/test_console.py` pins 20
 behaviours, including light/dark adaptation and **no external scripts or
@@ -36,7 +38,8 @@ browser before believing it (`.claude/rules/testing.md`, R-022).
 
 **Changing the design means changing the spec first.** R-029 is the worked
 example: the root `Makefile` shape moved spec → plan → code, in that order,
-because a ruling cannot overrule the binding authority. Do the same for §13.1.
+because a ruling cannot overrule the binding authority. §13.1 followed the
+same order — the spec was amended before any CSS moved.
 
 **Task 20 was the first task to run the live stack, and it found three
 things.** `make up` had never started anything (R-025 — the guard matched its
@@ -87,7 +90,7 @@ the CLI too.
 | Document | What it is |
 |----------|------------|
 | `docs/superpowers/specs/2026-09-04-customer-onboarding-design.md` | **The binding authority.** 22 sections. Settles everything. |
-| `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 21 tasks, 127 steps. How the spec gets built. |
+| `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 22 tasks, 142 steps. How the spec gets built. **Task 22 runs before Task 21** — the number is a label, not a position, as with Task 4's `SCHEDULE FIRST`. |
 | `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. R-014's deferred console work landed in Task 18 as R-022; no open questions remain. **R-021–R-023 were renumbered from R-017–R-019 when the Task 18 branch merged `main`** — two branches wrote those three numbers in parallel, and the commit messages still use the old ones. |
 | `docs/demo-brief.md` | 11 numbered decisions with the reasoning and the **rejected** alternatives. |
 | `docs/DEVELOPMENT-PROCESS.md` | The four-stage process this repo follows. |
@@ -96,6 +99,38 @@ the CLI too.
 in the plan conflicts with the spec, the spec wins. When neither answers,
 make a ruling, log it, and keep going — see §19 of the spec, which pre-answers
 the seven ambiguities most likely to come up.
+
+## Prior art — check it before inventing anything
+
+This repo is one of five sibling demos, and the spec borrows from them at named
+points rather than starting clean. **Read the relevant one before designing a
+subsystem from scratch.** All of these are on disk; add one to a session with
+`/add-dir`. `.claude/settings.local.json` already grants `Read()` on
+`canonical-ai-demo`.
+
+| Repo | Path | What to take from it |
+|------|------|----------------------|
+| **Canonical AI demo** | `~/src/demos/canonical-ai-demo` | The closest relative. `python/workflows/agent.py` seeds our agent child's `_think()`/`_dispatch()` shape (spec §8); `make/common.mk` seeds the `pgrep` guards (§14); its `python/` split seeds our layout (§15); its `TALK_TRACK.md` is the precedent for §21. Its `web/index.html` is 377 lines and the only sibling console of comparable ambition. |
+| **Temporal agent harness** | `~/src/demos/temporal-agent-harness` | Inner/outer agentic loop design. `ui/src/app.css` is 71 lines and the **best-organised token set of any sibling** — numbered ramps (`--surface-0..3`, `--text-1..3`), semantic state colours, and a `--focus-ring` token ours lacks. |
+| **Order management demo** | `~/src/demos/temporal-order-management-demo` | Multi-SDK layout. Its `ui/static/style.css` is *not* worth following — `font-family: sans-serif`, no tokens. |
+| **Money transfer demo** | `~/src/demos/money-transfer-demo` | Multi-SDK repo shape. No console. |
+| **SDK samples** | `~/src/python/samples-python` (also `../go/samples-go`, `../typescript/samples-typescript`, `../java/samples-java`) | `message_passing` (signals/queries/updates), `updatable_timer` (durable SLA timers), `polling`, `schedules`, `replay` (the determinism gate). |
+
+Longer versions of this table live in `docs/demo-brief.md` (§"Reference
+material for design") and `docs/DEVELOPMENT-PROCESS.md` (§"Reference
+material") — they were there from Stage 1, but not here, so sessions kept
+rediscovering them.
+
+**Borrow the pattern, not the declaration.** Our console carries
+`font-feature-settings: "cv05", "ss01"`, copied from `canonical-ai-demo`, whose
+stack leads with `Inter` where those character variants exist. Ours leads with
+`ui-sans-serif`, so they do nothing. When you lift CSS, lift what it depends on
+or drop it.
+
+**Where we deliberately diverge, §1 says so.** `canonical-ai-demo` is
+agent-outer / deterministic-inner; this demo is the inversion. That is the
+contribution, not an accident — check §1 and §18 before "aligning" anything
+back.
 
 ## Rules
 

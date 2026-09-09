@@ -77,6 +77,28 @@ R-022 did exactly this for the editable field table, and the check is what
 turned "the substring is present" into "the analyst's correction reaches
 `field_edits`".
 
+### Never open the console over `file://`
+
+The page's first act is `fetch("/api/status/" + CLIENT_KEY)`. Under `file://`
+Chromium refuses the scheme, so the fetch throws, `#review` stays `hidden` and
+`#detail` stays empty — the page renders its idle state and says "Gateway
+unreachable". A browser check written that way is not weak, it is aimed at the
+wrong screen: the review gate, the gap card, the error line and both alert
+tones never exist. Give the page an `http://` origin and fulfil both the
+document and `/api/status/*` from `page.route`; no server process is needed.
+R-032 lost a whole contrast audit to this — it passed, against a page showing
+none of what it was auditing.
+
+### A check that skips a missing element is not a check
+
+`if not el: continue` turns "this pair is absent" into "this pair passed". When
+the element is supposed to be on screen, **assert it rendered**, then assert the
+property. Absence is the more likely failure and the one that reports as green:
+in R-032 three of four contrast selectors were silently skipped on every run.
+The same goes for a grep whose subject can vanish — an audit over
+`font-size: Npx` matches nothing once every size is a `var()`, so
+`used <= ALLOWED` passes against any scale at all. Pin the token values too.
+
 ## Test environments
 
 Use `WorkflowEnvironment.start_local()` for most tests; it is shareable via a

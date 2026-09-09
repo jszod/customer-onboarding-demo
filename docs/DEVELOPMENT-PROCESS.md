@@ -192,16 +192,27 @@ rules, patterns, and troubleshooting references.
       [demo-brief.md](demo-brief.md).
 - [x] **Spec review cleared** — the hard gate. Planning proceeded on the
       approved spec.
-- [x] **Stage 2 — Plan.** 21 tasks, 127 steps, written to
+- [x] **Stage 2 — Plan.** 22 tasks, 142 steps, written to
       [`docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md`](superpowers/plans/2026-09-04-customer-onboarding-demo.md)
       and self-reviewed against the spec. The self-review closed four coverage
       gaps: §19.1 dotted paths for list members, §19.3 an edit to an optional
       field, §19.4 no fourth child on final rejection, and §10.4's LLM-outage
       toggle, which the console surfaced but no activity consumed.
-- [ ] **Stage 3 — Build.** Not started; no implementation code exists. Zero of
-      the plan's 127 steps are checked. Begins at Task 1 (skeleton, config,
-      Makefile); Tasks 1→2→3 are sequential and gate everything, and Task 3 —
-      the 22-scenario manifest — is the verification gate the rest of the
-      build depends on. The plan's Execution Handoff still awaits a choice
-      between subagent-driven and inline execution.
+      **Amended after Stage 3 began:** Task 22 was added for §13.1, the
+      console's visual system, which §13 had deferred to Stage 3 without a
+      spec. Spec first, then plan, then code — see R-029.
+- [x] **Stage 3 — Build — Tasks 1–20.** Skeleton and config, models and
+      `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
+      documents, core banking, the gateway, the console's functional surface,
+      all four activities, the extraction child, the parent's loop and happy
+      path, the recorded fixtures, and the committed histories with their
+      replay gate. Suite: 207 passed, 0 skipped; `make verify` reports
+      `VERIFY OK: 22/22`. Executed subagent-driven, one task per dispatch.
+      Every deviation is logged in [RULINGS.md](RULINGS.md).
+- [ ] **Stage 3 — Build — Task 22, then Task 21.** Task 22 implements §13.1
+      against `web/static/index.html`; its Step 1 is a mockup that must be
+      approved before any CSS moves, because §13.1 was written from reading
+      the stylesheet rather than looking at the rendered page. Task 21 —
+      final verification and the README — runs last, because it walks the
+      console by hand and writes the README against what it sees.
 - [ ] Stage 4 — Verify
