@@ -16,11 +16,46 @@ Suite: **207 passed, 0 skipped — `make verify` says `VERIFY OK: 22/22`.** The
 manifest is complete, so the progress bar is spent: from here a skip is a
 regression, not remaining work.
 
+**Two pieces of work remain, and only one of them is in the plan.**
+
+1. **Task 21** — final verification and growing the README. The plan's last
+   task; it consumes everything and produces nothing new.
+2. **The console's visual design** — §13 fixes the functional surface and ends
+   with "Visual design is Stage 3 work". That pass has never been run. What
+   exists is 284 lines of CSS written in passing across Tasks 8, 11 and 18, and
+   there is **no visual spec anywhere** — no palette, type scale, spacing,
+   wireframe or responsive rule. This is a real hole, not an oversight: §13
+   says so out loud. It is not a plan task, so it needs either a §13.1 in the
+   spec or a new task before it is built (see the spec-first order below).
+
+Constraints any visual pass inherits: `tests/test_console.py` pins 20
+behaviours, including light/dark adaptation and **no external scripts or
+stylesheets** — no CDN fonts, no Tailwind. And those tests grep the page as
+text, so they pass against a page whose JavaScript throws; drive it in a real
+browser before believing it (`.claude/rules/testing.md`, R-022).
+
+**Changing the design means changing the spec first.** R-029 is the worked
+example: the root `Makefile` shape moved spec → plan → code, in that order,
+because a ruling cannot overrule the binding authority. Do the same for §13.1.
+
 **Task 20 was the first task to run the live stack, and it found three
 things.** `make up` had never started anything (R-025 — the guard matched its
 own recipe), fixture mode died on the second model call of every real run
 (R-026), and four defects in the plan's own Task 20 code (R-027). Read those
 three before touching `make/`, `fixture_call_llm`, or the capture tool.
+
+**Where the work lives.** Branch `claude/next-work-item-imsbdj`, pushed, six
+commits ahead of `main`, no PR opened. Working tree clean. Local prerequisites
+are the README's Setup: the Temporal CLI (`make demo` and `make histories`
+shell out to it), `uv`, and **no API key** — the fixtures are committed, so
+`make verify` runs on a fresh clone as-is.
+
+**`make/` changed shape after Task 20.** The root `Makefile` is now
+`include make/common.mk` rather than a rule forwarding nineteen target names to
+`python/`; every target is defined once, in `common.mk`, and `python/Makefile`
+is the same include from one directory down. The spec was amended first (§14,
+§15) — see R-029, and `.claude/rules/stack-and-make.md` for why not to
+reintroduce forwarding.
 
 **The replay gate is now the sharpest thing in the suite.** `histories/` holds
 nine captured histories and `tests/test_replay.py` replays every one. A red
