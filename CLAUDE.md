@@ -20,13 +20,13 @@ regression, not remaining work.
 
 1. **Task 21** — final verification and growing the README. The plan's last
    task; it consumes everything and produces nothing new.
-2. **The console's visual design** — §13 fixes the functional surface and ends
-   with "Visual design is Stage 3 work". That pass has never been run. What
-   exists is 284 lines of CSS written in passing across Tasks 8, 11 and 18, and
-   there is **no visual spec anywhere** — no palette, type scale, spacing,
-   wireframe or responsive rule. This is a real hole, not an oversight: §13
-   says so out loud. It is not a plan task, so it needs either a §13.1 in the
-   spec or a new task before it is built (see the spec-first order below).
+2. **The console's visual design** — **§13.1 is now written**; the code has not
+   caught up. The spec fixes a six-size type scale, three font weights, a 4px
+   spacing unit, sibling-convention token names, one breakpoint at 900px, a
+   scrolling stepper, and `:focus-visible` on everything. `web/static/index.html`
+   still carries the thirteen sizes and eight weights it accumulated across
+   Tasks 8, 11 and 18. **This is not yet a plan task** — spec → plan → code, so
+   it needs a task written before it is built.
 
 Constraints any visual pass inherits: `tests/test_console.py` pins 20
 behaviours, including light/dark adaptation and **no external scripts or
@@ -36,7 +36,8 @@ browser before believing it (`.claude/rules/testing.md`, R-022).
 
 **Changing the design means changing the spec first.** R-029 is the worked
 example: the root `Makefile` shape moved spec → plan → code, in that order,
-because a ruling cannot overrule the binding authority. Do the same for §13.1.
+because a ruling cannot overrule the binding authority. §13.1 followed the
+same order — the spec was amended before any CSS moved.
 
 **Task 20 was the first task to run the live stack, and it found three
 things.** `make up` had never started anything (R-025 — the guard matched its
@@ -96,6 +97,38 @@ the CLI too.
 in the plan conflicts with the spec, the spec wins. When neither answers,
 make a ruling, log it, and keep going — see §19 of the spec, which pre-answers
 the seven ambiguities most likely to come up.
+
+## Prior art — check it before inventing anything
+
+This repo is one of five sibling demos, and the spec borrows from them at named
+points rather than starting clean. **Read the relevant one before designing a
+subsystem from scratch.** All of these are on disk; add one to a session with
+`/add-dir`. `.claude/settings.local.json` already grants `Read()` on
+`canonical-ai-demo`.
+
+| Repo | Path | What to take from it |
+|------|------|----------------------|
+| **Canonical AI demo** | `~/src/demos/canonical-ai-demo` | The closest relative. `python/workflows/agent.py` seeds our agent child's `_think()`/`_dispatch()` shape (spec §8); `make/common.mk` seeds the `pgrep` guards (§14); its `python/` split seeds our layout (§15); its `TALK_TRACK.md` is the precedent for §21. Its `web/index.html` is 377 lines and the only sibling console of comparable ambition. |
+| **Temporal agent harness** | `~/src/demos/temporal-agent-harness` | Inner/outer agentic loop design. `ui/src/app.css` is 71 lines and the **best-organised token set of any sibling** — numbered ramps (`--surface-0..3`, `--text-1..3`), semantic state colours, and a `--focus-ring` token ours lacks. |
+| **Order management demo** | `~/src/demos/temporal-order-management-demo` | Multi-SDK layout. Its `ui/static/style.css` is *not* worth following — `font-family: sans-serif`, no tokens. |
+| **Money transfer demo** | `~/src/demos/money-transfer-demo` | Multi-SDK repo shape. No console. |
+| **SDK samples** | `~/src/python/samples-python` (also `../go/samples-go`, `../typescript/samples-typescript`, `../java/samples-java`) | `message_passing` (signals/queries/updates), `updatable_timer` (durable SLA timers), `polling`, `schedules`, `replay` (the determinism gate). |
+
+Longer versions of this table live in `docs/demo-brief.md` (§"Reference
+material for design") and `docs/DEVELOPMENT-PROCESS.md` (§"Reference
+material") — they were there from Stage 1, but not here, so sessions kept
+rediscovering them.
+
+**Borrow the pattern, not the declaration.** Our console carries
+`font-feature-settings: "cv05", "ss01"`, copied from `canonical-ai-demo`, whose
+stack leads with `Inter` where those character variants exist. Ours leads with
+`ui-sans-serif`, so they do nothing. When you lift CSS, lift what it depends on
+or drop it.
+
+**Where we deliberately diverge, §1 says so.** `canonical-ai-demo` is
+agent-outer / deterministic-inner; this demo is the inversion. That is the
+contribution, not an accident — check §1 and §18 before "aligning" anything
+back.
 
 ## Rules
 

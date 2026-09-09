@@ -856,8 +856,147 @@ history, so this is free. The `workflow_streams` contrib module is the
 documented upgrade path if token-level streaming is ever wanted; it is
 over-machinery for coarse state.
 
-**Visual design is Stage 3 work**, via the `frontend-design` skill. This spec
-fixes the functional surface only.
+§13 fixes the **functional** surface. §13.1 fixes the **visual** system.
+
+### 13.1 Visual system
+
+Written after Tasks 8, 11 and 18 had each added CSS in passing. The palette
+those tasks produced is deliberate and is **ratified here rather than
+replaced**; what was missing was a written system, so every new callsite
+invented its own size and spacing. This section exists to stop that drift.
+
+**Principles**, derived from §2's primary audience — an SE driving the page
+live on a laptop in a customer call:
+
+1. **Scanned, not read.** State must be legible from across a meeting room.
+2. **Colour *and* shape, always.** Every state is carried by at least two
+   channels — a fill plus a border, a tint plus a glyph. A bad projector
+   flattens hue, and roughly 1 in 12 men cannot separate our `--done` green
+   from our `--alert` red. Colour alone is never the signal.
+3. **The page is a document, not an app shell.** It scrolls. No fixed
+   full-height panes, no internal scroll regions except where §13.1's
+   responsive rules require one.
+
+#### 13.1.1 Tokens
+
+Naming follows `temporal-agent-harness/ui/src/app.css` — numbered surface and
+text ramps rather than ad-hoc names. **Values are ours and unchanged.**
+
+| Token | Light | Dark | Use |
+|-------|-------|------|-----|
+| `--surface-0` | `#f4f2ee` | `#0e1014` | Page ground |
+| `--surface-1` | `#ffffff` | `#171a20` | Panels, cards |
+| `--surface-2` | `#faf9f6` | `#1d212a` | Recessed rows, inputs, chips |
+| `--text-1` | `#14161b` | `#eef0f4` | Primary text |
+| `--text-2` | `#5d6472` | `#99a1b2` | Secondary text, labels, meta |
+| `--border` | `#e3e0d8` | `#272c36` | Default hairline |
+| `--border-strong` | `#cfcbc0` | `#38404e` | Control outlines, chips |
+| `--accent` / `--accent-ink` / `--accent-wash` | `#2a4b9b` / `#ffffff` / `#eaeffb` | `#7fa3ff` / `#0e1014` / `#1b2436` | In-progress, primary action, focus |
+| `--done` / `--done-wash` | `#16755a` / `#e6f3ee` | `#4ac79b` / `#142b25` | Completed step, verified field |
+| `--wait` / `--wait-wash` | `#a1620a` / `#fbf1e0` | `#e8ad4a` / `#2c2415` | Durable wait — the **normal** state |
+| `--alert` / `--alert-wash` | `#ab2020` / `#fbebe9` | `#ff7b72` / `#2e1a1a` | Gap, failure, terminal rejection |
+| `--focus-ring` | `--accent` @ 40% | `--accent` @ 45% | `:focus-visible` outline |
+| `--control-bg` / `--control-hover` | `#ffffff` / `#f4f2ee` | `#0f1318` / `#18202a` | Buttons, inputs |
+
+Both themes are **opaque**. `temporal-agent-harness` builds borders from
+`rgba(255,255,255,.08)`, which is correct over a fixed dark ground and
+invisible on paper; a dual-theme page cannot use that trick. This is the one
+place the inherited structure had to be re-derived rather than copied.
+
+**Two text levels, not three.** The sibling convention has `--text-1..3`. This
+page has exactly two roles — primary and secondary — and every current use of
+the old `--muted` is the same role. A third level is added when a third role
+appears, not before.
+
+**`--done` / `--wait` / `--alert`, not `--success` / `--warning` / `--error`.**
+A deliberate departure from the sibling names, because the semantics differ: a
+durable wait at the KYC gate is the *expected* path (§9.1), often for days.
+Naming it `warning` would tell the viewer something is wrong at the exact
+moment the demo is claiming the opposite.
+
+#### 13.1.2 Type scale
+
+Six sizes. The thirteen that Tasks 8–18 produced (11, 11.5, 12, 12.5, 13,
+13.5, 14, 14.5, 15, 15.5, 17, 19, 21px) collapse as follows — the half-pixel
+steps were never distinguishable at projector distance.
+
+| Token | Size | Replaces | Use |
+|-------|------|----------|-----|
+| `--fs-eyebrow` | 11px | 11, 11.5, 12 | Uppercase labels, chips, footnote |
+| `--fs-meta` | 13px | 12.5, 13 | Secondary text, sub-labels, `.tui-link` |
+| `--fs-ui` | 14px | 13.5, 14 | Table text, step labels, messages |
+| `--fs-body` | 15px | 14.5, 15, 15.5 | Controls, buttons, body copy, inputs |
+| `--fs-title` | 17px | 17 | Panel headings, `.fact-v` |
+| `--fs-display` | 21px | 19, 21 | Client name, current-stage title |
+
+**Weights: 500, 600, 700.** Replacing eight (500, 520, 560, 600, 620, 640,
+680, 700). The `ui-sans-serif` stack resolves to a non-variable system face on
+most machines, so `520` and `560` render identically to `500` — five of the
+eight distinctions existed only in the stylesheet. 500 is body, 600 is headings
+and labels, 700 is eyebrows and tabular numerals.
+
+**Delete `font-feature-settings: "cv05", "ss01"`.** Copied from
+`canonical-ai-demo`, whose stack leads with `Inter`, where those character
+variants exist. Ours leads with `ui-sans-serif`; the declaration is inert.
+Either lift the font too or drop the declaration — this spec drops it, because
+self-hosting a webfont to gain two character variants fails the cost test, and
+§13's no-external-stylesheets rule forbids a CDN.
+
+#### 13.1.3 Spacing and radius
+
+**4px base unit**, tokens `--sp-1` (4px) through `--sp-8` (32px). The ad-hoc
+3, 5, 6, 7, 9, 11, 13, 18, 22 and 26px values all round into it. `--radius`
+stays 10px for panels; `--radius-sm` is 8px for controls, chips and steps.
+
+#### 13.1.4 Layout and responsive rules
+
+Regions, top to bottom: `.topbar` (brand, client, stage pill, Temporal UI
+link), the seven-step `.stepper`, the current-stage `.detail` panel, the
+`.review` panel when the gate is open, then `.cols` — actions beside demo
+controls — and a footnote. Content is capped at **1180px** and centred.
+
+**One breakpoint: 900px.** Replacing the current 900px/860px disagreement,
+which had no reason behind it. Below 900px, `.cols` collapses to one column.
+
+**The stepper scrolls; it does not wrap.** Below 900px it becomes
+`repeat(7, minmax(96px, 1fr))` inside an `overflow-x: auto` track. The current
+rule collapses seven columns to four, which leaves an orphan row of three and
+destroys the one thing the stepper exists to communicate — position within a
+seven-step whole (§12). A horizontal scroll preserves the metaphor at the cost
+of a gesture; wrapping preserves the gesture at the cost of the meaning.
+
+#### 13.1.5 Accessibility
+
+- **`:focus-visible` on every interactive element** using `--focus-ring` —
+  buttons, links, checkboxes, text inputs and the editable table cells.
+  Currently only `.gap input[type=text]` has any focus treatment, which makes
+  the review gate unusable by keyboard.
+- **4.5:1 minimum text contrast** in both themes, including text on the
+  `-wash` fills.
+- **`prefers-reduced-motion: reduce`** disables all animation, not only the
+  stage pill's pulse. Already correct for `.pill::before`; the rule generalises.
+- **`color-scheme`** stays declared on `:root` in both themes so form controls
+  and scrollbars follow.
+
+#### 13.1.6 Why light-first, when the siblings are dark-only
+
+`canonical-ai-demo` and `temporal-agent-harness` are both dark-only. This
+console is light-first with a dark theme, for two reasons: `test_console.py`
+pins light/dark adaptation as a behaviour, and §2's audience is a laptop
+screen in a lit meeting room, where a light page survives glare and a
+projector's raised black floor better than a dark one.
+
+Recorded here so the divergence reads as a decision. Aligning the three demos
+on one visual language is a legitimate future call — it is a change to this
+section, not a bug to be fixed in CSS.
+
+#### 13.1.7 Out of scope
+
+No webfonts, no icon set, no CSS framework, no build step — §13's tests forbid
+external scripts and stylesheets, and the page stays a single self-contained
+`web/static/index.html`. A component library, a theme toggle (the OS setting is
+honoured instead), and animated stage transitions are all rejected: none of
+them changes what the demo demonstrates.
 
 ## 14. Runbook
 
