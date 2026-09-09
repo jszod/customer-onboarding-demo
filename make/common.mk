@@ -21,7 +21,11 @@ ROOT := $(shell cd $(dir $(lastword $(MAKEFILE_LIST)))/.. && pwd)
 # which is the point: the worker, gateway and core banking service are each
 # started by a recipe here and read their config from the environment. Recipes
 # that set a variable inline still win -- `test` and `verify` force
-# FIXTURE_MODE=1 that way, so a stale `.env` cannot turn the suite live.
+# FIXTURE_MODE=1 and DEMO_STEP_MS=0 that way, so a stale `.env` can neither
+# turn the suite live nor make it pay the demo's pacing. Any future knob that
+# slows or redirects a run belongs in that inline list too: `export` hands the
+# whole `.env` to every recipe, so opting the suite OUT is the only protection
+# (a `DEMO_STEP_MS=2500` in `.env` took `make verify` from 32s to 2m35s).
 -include $(ROOT)/.env
 export
 .PHONY: up down status logs demo demo-reset temporal gateway core-banking \
@@ -78,7 +82,7 @@ logs:
 	tail -f /tmp/onboarding-*.log
 
 test:
-	cd $(ROOT) && FIXTURE_MODE=1 uv run pytest -v
+	cd $(ROOT) && FIXTURE_MODE=1 DEMO_STEP_MS=0 uv run pytest -v
 
 # The definition of done: the suite is GREEN and nothing is skipped. Both
 # halves matter, and the first one is easy to lose -- piping pytest into `tee`
@@ -86,7 +90,7 @@ test:
 # VERIFY OK and exited 0. `pipefail` is not in POSIX sh and this Makefile does
 # not pick its shell, so the status travels through a file instead.
 verify:
-	cd $(ROOT) && { FIXTURE_MODE=1 uv run pytest -v -p no:randomly \
+	cd $(ROOT) && { FIXTURE_MODE=1 DEMO_STEP_MS=0 uv run pytest -v -p no:randomly \
 	      --override-ini=addopts= -rs 2>&1; \
 	    echo $$? > /tmp/onboarding-verify.status; } \
 	    | tee /tmp/onboarding-verify.log; \

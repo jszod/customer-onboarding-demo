@@ -1723,3 +1723,31 @@ the whole suite 220; the §16.8 manifest is untouched at 22.
 input paths now emitting ISO it is unreachable through the UI, and the
 remaining trigger is the composite-path edit the code comment already
 anticipates. Worth trimming, not worth bundling into this fix.
+
+## R-035 — `export` in the Makefile handed the demo's pacing to the test suite
+
+**Task 23, found by measuring rather than assuming.** `DEMO_STEP_MS` defaults
+to `0` precisely so the suite pays nothing for it, and §17.1 says so. But
+`make/common.mk` does `-include .env` followed by a bare `export`, so the
+moment a real `.env` carried `DEMO_STEP_MS=2500` the pacing reached
+`make verify` as well: **154.88s, up from 31.79s.** Five times slower, still
+green, no signal that anything was wrong.
+
+A default is only a default until something sets the variable. The knob was
+correct; the protection was missing.
+
+`common.mk` already solves this exactly once — `test` and `verify` force
+`FIXTURE_MODE=1` inline, and the comment above the `export` says this is so
+"a stale `.env` cannot turn the suite live". That promise covered one variable.
+Both recipes now force `DEMO_STEP_MS=0` the same way, and the comment names the
+general rule: `export` hands the whole `.env` to every recipe, so opting the
+suite **out** is the only protection, and any future knob that slows or
+redirects a run belongs in that inline list.
+
+Verified with `.env` left at `2500` rather than by removing it — 31.36s. Fixing
+the measurement instead of the fault is how this would have come back.
+
+**Not promoted.** `.claude/rules/stack-and-make.md` already covers `make/`, and
+this is one line in one file rather than a pattern an implementer will meet
+repeatedly. The comment in `common.mk` is where someone editing these recipes
+will actually be looking.
