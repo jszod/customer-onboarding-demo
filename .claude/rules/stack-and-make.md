@@ -85,7 +85,25 @@ It is intermittent and it is not the demo stack: it happened both with the
 stack up and with it down, and three consecutive clean runs followed with
 nothing changed (R-030 has the measurements). `conftest.py` retries the start
 once, which is the only lever — the budget is compiled into the Rust bridge and
-`start_local` takes no timeout argument.
+neither starter takes a timeout argument.
+
+Both ephemeral servers do this. `start_local` says "Failed starting Temporal
+dev server" and `start_time_skipping` says "Failed starting **test** server";
+they are different binaries with the same five seconds. `_started_with_one_retry`
+takes the starter as an argument for that reason — retrying one and not the
+other bought exactly one run (R-031). One error at setup is `skip_env`;
+twenty-three is `env`.
+
+## Never gate on a piped command's exit status
+
+    make verify 2>&1 | tail -2 && git commit …      # WRONG — that is tail's zero
+
+A pipeline's status is its last command's, so this commits over a red suite.
+`make/common.mk` carries the same trap in prose above the `verify` recipe — it
+routes pytest's status through a file rather than `tee` for exactly this — and
+it has still caught someone from the outside since (R-031). Run `make verify`
+bare and read its last line, or redirect to a file and check that, or use
+`${PIPESTATUS[0]}`.
 
 So if you see it: it is not a broken fixture and there is nothing to fix in the
 test. Run it again. If it survives the retry *and* a re-run, look at the

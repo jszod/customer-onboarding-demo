@@ -1526,3 +1526,42 @@ minutes of measurement was all it took to disprove. **Before promoting a
 diagnosis into `.claude/rules/`, reproduce it deliberately — a rule is read as
 settled fact by everyone who comes after, and a wrong one sends them to fix
 something that was never broken.**
+
+## R-031 — the same flake, the other fixture; and a green gate I did not read
+
+**Immediately after R-030.** The next `make verify` failed with one error, not
+23:
+
+    ERROR at setup of test_T_TIME_01_remind_then_escalate_fire_in_order
+    RuntimeError: Failed starting test server: Failed connecting to test
+    server after 5 seconds …
+
+R-030 retried `env` (`start_local`, the *dev* server) and stopped there.
+`skip_env` calls `start_time_skipping`, which spawns the *test* server — a
+different binary and a different message, the same ephemeral spawn against the
+same five-second budget compiled into the same bridge. One run was enough to
+find it, which says the retry belonged at the shared step from the start.
+
+**The ruling.** `_started_with_one_retry(starter)` takes the starter as an
+argument and both fixtures use it; the guard matches either message and
+re-raises anything else. Naming one starter in a helper for a fault that
+belongs to both was the mistake, and the fix is the shape, not another clause.
+
+**The second half of this, which is worse.** The run that produced this error
+still got committed and pushed. The command was:
+
+```
+make verify 2>&1 | tail -2 && git add -A && git commit …
+```
+
+A pipeline's status is its **last** command's, so `&&` read `tail`'s zero and
+proceeded. `make/common.mk` documents this exact trap directly above the
+`verify` recipe — it is why the recipe routes pytest's status through a file
+rather than through `tee` — and it was still walked into, from outside, on the
+gate that trap was documented for. The commit was docs-only and the suite was
+one flake short of green, so nothing bad shipped; that is luck, not a process.
+
+**Never gate on a piped command's status.** Redirect to a file and read the
+file, or check `${PIPESTATUS[0]}` — and when the gate is `make verify`, run it
+bare and look at the last line before committing. Added to
+`.claude/rules/stack-and-make.md` beside the flake it hid.

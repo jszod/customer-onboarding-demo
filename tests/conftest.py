@@ -117,9 +117,14 @@ class StubExtractionChild:
 async def skip_env():
     """Time-skipping environments CANNOT be shared between tests (§16.3), so
     this one stays function-scoped and is never reused. Each test gets a clock
-    it can advance a year without touching anyone else's."""
-    async with await WorkflowEnvironment.start_time_skipping(
-            data_converter=config.build_data_converter()) as e:
+    it can advance a year without touching anyone else's.
+
+    Retried like `env` below, and for the same reason: this is the *test*
+    server rather than the dev server, but it is the same ephemeral spawn
+    against the same five-second budget, and it missed it one run after the
+    retry went in for `env` alone (R-031)."""
+    async with await _started_with_one_retry(
+            WorkflowEnvironment.start_time_skipping) as e:
         yield e
 
 
@@ -144,27 +149,36 @@ async def env():
     not answer inside the bridge's five-second connect budget -- twice in six
     runs of the full suite on the day this was written, on a machine where
     starting one standalone took 0.21s five times out of five. The budget is
-    compiled into the Rust bridge and `start_local` exposes no knob for it, so
-    the retry is the only lever. It matters more here than it would elsewhere:
-    this fixture is session-scoped, so its single failure errors every one of
-    the 23 tests that depend on it and reads like 23 broken tests (R-030).
+    compiled into the Rust bridge and neither starter exposes a knob for it, so
+    the retry is the only lever. It matters more here than for `skip_env`: this
+    fixture is session-scoped, so its single failure errors every one of the 23
+    tests that depend on it and reads like 23 broken tests (R-030).
     """
-    async with await _start_local_with_one_retry() as e:
+    async with await _started_with_one_retry(
+            WorkflowEnvironment.start_local) as e:
         yield e
 
 
-async def _start_local_with_one_retry() -> WorkflowEnvironment:
+# Both starters spawn an ephemeral server and give it five seconds to answer;
+# both occasionally miss it, and the message differs only in which server it
+# was ("Temporal dev server" for start_local, "test server" for
+# start_time_skipping). R-030 retried one of them and R-031 found the other the
+# next run, which is why this takes the starter as an argument rather than
+# naming one.
+_START_FAILURES = ("Failed starting Temporal dev server",
+                   "Failed starting test server")
+
+
+async def _started_with_one_retry(starter) -> WorkflowEnvironment:
     try:
-        return await WorkflowEnvironment.start_local(
-            data_converter=config.build_data_converter())
+        return await starter(data_converter=config.build_data_converter())
     except RuntimeError as first:
         # Only the startup failure. Anything else is a real fault and must not
         # be retried into a confusing second traceback.
-        if "Failed starting Temporal dev server" not in str(first):
+        if not any(f in str(first) for f in _START_FAILURES):
             raise
-        print(f"\ndev server did not start ({first}); retrying once")
-        return await WorkflowEnvironment.start_local(
-            data_converter=config.build_data_converter())
+        print(f"\nephemeral server did not start ({first}); retrying once")
+        return await starter(data_converter=config.build_data_converter())
 
 
 async def run_worker(env, stubs: Stubs):
