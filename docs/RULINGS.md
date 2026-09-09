@@ -1565,3 +1565,77 @@ one flake short of green, so nothing bad shipped; that is luck, not a process.
 file, or check `${PIPESTATUS[0]}` — and when the gate is `make verify`, run it
 bare and look at the last line before committing. Added to
 `.claude/rules/stack-and-make.md` beside the flake it hid.
+
+## R-032 — §13.1 was written mid-Stage-3; and "ratified" is not "measured"
+
+**Between Task 20 and Task 21, in review.** §13 fixed the console's functional
+surface and closed with "Visual design is Stage 3 work", naming no task to do
+it. So the pass never ran: Tasks 8, 11 and 18 each added CSS in passing and
+left 284 lines with a coherent palette and no system — fourteen font sizes,
+eight weights, no spacing unit, and two breakpoints that disagreed with each
+other for no recorded reason.
+
+**Why this is a ruling and not just a task.** The plan had 21 tasks and none of
+them covered this, so building it would have been code with no authority behind
+it. Per R-029 the order is spec → plan → code: §13.1 was written first (seven
+subsections — tokens, type scale, spacing, layout, accessibility, the
+light-first divergence, and what is out of scope), then Task 22 was added to
+the plan, and only then does any CSS move. Task 22 is numbered last but **runs
+before Task 21**, because Task 21 walks the console by hand and writes the
+README against what it sees. The number is a label, not a position, exactly as
+Task 4 is labelled `SCHEDULE FIRST`.
+
+**The palette was ratified rather than replaced** — deliberately. The colours
+Tasks 8/11/18 produced are good, and a visual pass that repaints a working
+palette is churn. What was missing was a written system, so every new callsite
+invented its own size and spacing.
+
+**And that is where this went wrong.** "Ratified" was done by reading the
+stylesheet. Nobody measured it. Three pairs fail §13.1.5's own 4.5:1 floor:
+
+| Pair | Measured | Where |
+|---|---|---|
+| `--wait` on `--wait-wash` | **4.40:1** | The stage pill in `is-waiting` |
+| `#fff` on `--done` | **2.11:1** | `.btn.go`, dark theme |
+| `#fff` on `--alert` | **2.52:1** | `.stepper li.is-failed .step-n`, dark |
+
+The first is the worst of the three, and not because of the margin. `--wait` is
+the *normal* state — §13.1.1 says so out loud — and the demo sits on that pill
+for the entire KYC beat. The two literals fail because `--done` and `--alert`
+invert between themes and a hardcoded white cannot follow them; the palette had
+`--accent-ink` for exactly this and simply never grew the other two.
+
+**The fix.** `--wait` darkens one step to `#985c09` (4.85:1) — hue and chroma
+unchanged, and the only value in the palette that moved. `--done-ink` and
+`--alert-ink` join `--accent-ink`, giving 9.01:1 and 7.55:1 in dark. §13.1.1
+now says every strong fill carries an ink token, and §13.1.5 says a colour is
+not ratified until it has been measured.
+
+**Cost.** The mockup in `docs/design/` and both screenshots had to be re-shot,
+because a mockup that no longer matches the spec reads as approved when it is
+not — its own README says so.
+
+**What the verification would have caught, and did not.** Task 22's browser
+drive loaded the console over `file://`. The page's first act is
+`fetch("/api/status/...")`; under that scheme Chromium refuses the request, so
+`#review` stays `hidden`, `#detail` stays empty, and the contrast audit skipped
+three of its four selectors while the screenshots showed an idle page reading
+"Gateway unreachable". The audit ran against a screen the demo never shows. It
+now serves the page from a routed `http://` origin with a stubbed status
+payload in `awaiting_review`, asserts each selector actually rendered rather
+than skipping a missing one, and covers eleven pairs including the strong
+fills.
+
+Two of the eight proposed tests could not fail either: the retired-token check
+carried trailing colons, so it saw stale *declarations* but not the stale
+`var()` *references* that a regex rename across 948 lines actually risks; and
+the type-scale audit goes vacuous the moment every size becomes a `var()`.
+Ten tests now, with the scale tokens checked against their values.
+
+**Promoted** to `.claude/rules/testing.md`, on the rule of two: this is the
+second time a gate has been green against something it could not see. R-022
+said grep-level tests pass against a page whose JavaScript throws; this says
+they also pass against a page that never reached the state under test, and that
+a check which `continue`s past a missing selector is not a check. Both clauses
+live beside R-022's, because the next person to write a Playwright audit will
+reach for `file://` and for `if not el: continue` in the same sitting.
