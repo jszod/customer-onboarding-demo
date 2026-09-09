@@ -1319,6 +1319,7 @@ feature.** Everything downstream gates on it.
 | `SLA_ESCALATE` | `7d` | `60s` |
 | `CLIENT_ID_SLA` | `1d` | `45s` |
 | `CORE_SLOW_MS` | `10000` | — |
+| `DEMO_STEP_MS` | `0` | `1500` |
 | `DOCUMENT_STORE` | `./.store` | — |
 | `CORE_BANKING_URL` | `http://localhost:8001` | — |
 | `GATEWAY_URL` | `http://localhost:8000` | — |
@@ -1331,6 +1332,55 @@ client-ID callback.
 
 **The data converter is constructed in exactly one place**, `config.build_data_converter()`,
 selected by `PAYLOAD_CODEC`. This is the seam described in §18.
+
+### 17.1 `DEMO_STEP_MS` — pacing the stages so they can be watched
+
+§2's primary audience is an SE driving the page live on a customer call. The
+stubbed stages complete in milliseconds, so the stepper jumps from 1 to 3
+before anyone has read it — and *visible progress through a long process* is
+the whole point being demonstrated. `DEMO_STEP_MS` pads the fast stages.
+Default `0`: `make test` and `make verify` are unaffected.
+
+**The delay goes inside the activity, never in the workflow.** A
+`workflow.sleep()` between steps would emit `TimerStarted` / `TimerFired` into
+every execution, invalidating all nine committed histories and forcing a
+re-capture of the §16.5 replay gate — the gate's whole value is that it is not
+re-captured to make it pass. Activity *duration* adds no events at all;
+`ActivityTaskScheduled/Started/Completed` are already there. It is also the
+better picture: a padded activity shows as **Running** on the Timeline carrying
+its `static_summary` (§12), which is the observability story, where a bare
+timer illustrates nothing.
+
+**`await asyncio.sleep()`, never `time.sleep()`.** Every activity here is
+`async def` and the worker registers no `activity_executor`, so they share the
+event loop; a blocking sleep would stall every other activity, every workflow
+task and the pollers. Temporal's own guidance is explicit that `time.sleep` in
+an `async def` activity "can block the entire system from doing anything".
+`core_banking/app.py` does use `time.sleep` for `CORE_SLOW_MS` and is correct
+to — its routes are sync `def`, which FastAPI runs in a threadpool. The
+precedent does not transfer.
+
+| Stage | Activity | Multiplier | At `1500` |
+|-------|----------|-----------:|----------:|
+| 1 Collect docs | `ingest_documents` | 2× | 3.0s |
+| 2 Extract | `fixture_call_llm` **only** | 1× per iteration | 1.5s |
+| 6 Send docs | `send_documents` | 1× | 1.5s |
+| 7 Notify | `notify` | 0.5× | 0.75s |
+
+Multipliers rather than one flat value, so the beats vary instead of landing
+on a suspiciously identical rhythm; ingest is longest because it is five
+documents.
+
+**Step 2 is padded under `FIXTURE_MODE` only.** A live extraction already takes
+real seconds per iteration, so padding it there would slow the demo down for no
+illustrative gain. `live_call_llm` is untouched.
+
+**Steps 3, 4 and 5 get nothing.** The KYC gate and the client-ID wait are
+already long and already the point, and `open_account` must not be touched at
+all: its 5s `start_to_close_timeout` **is** the ambiguous-timeout beat (§10.1),
+and padding it would either eat the margin or fire the timeout spuriously.
+`CORE_SLOW_MS` is the deliberate, purposeful version of a slow core, and it
+lives on the core-banking side.
 
 ## 18. Non-goals and stated scope cuts
 

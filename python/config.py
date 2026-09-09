@@ -5,6 +5,7 @@ PayloadCodec later is configuration rather than surgery (§18).
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from datetime import timedelta
@@ -35,6 +36,7 @@ class Settings(BaseModel):
     sla_escalate: timedelta
     client_id_sla: timedelta
     core_slow_ms: int
+    demo_step_ms: int
     document_store: Path
     core_banking_url: str
     gateway_url: str
@@ -55,12 +57,29 @@ def settings() -> Settings:
         sla_escalate=_duration(env("SLA_ESCALATE", "7d")),
         client_id_sla=_duration(env("CLIENT_ID_SLA", "1d")),
         core_slow_ms=int(env("CORE_SLOW_MS", "10000")),
+        demo_step_ms=int(env("DEMO_STEP_MS", "0")),
         document_store=Path(env("DOCUMENT_STORE", "./.store")),
         core_banking_url=env("CORE_BANKING_URL", "http://localhost:8001"),
         gateway_url=env("GATEWAY_URL", "http://localhost:8000"),
         outbox_dir=Path(env("OUTBOX_DIR", "./outbox")),
         payload_codec=env("PAYLOAD_CODEC", "off"),
     )
+
+
+async def demo_pause(multiplier: float = 1.0) -> None:
+    """§17.1. Pad a stubbed stage so a live audience can watch it happen.
+
+    `asyncio.sleep`, not `time.sleep`: the activities are `async def` sharing
+    one event loop, so a blocking sleep would stall every other activity, the
+    workflow tasks and the worker's pollers. And this belongs in an ACTIVITY,
+    never in a workflow -- activity duration adds no history events, where a
+    durable timer would rewrite all nine committed histories (§16.5).
+
+    Default 0, so the suite pays nothing for it.
+    """
+    ms = settings().demo_step_ms
+    if ms:
+        await asyncio.sleep(ms * multiplier / 1000)
 
 
 def build_data_converter() -> DataConverter:

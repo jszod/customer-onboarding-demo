@@ -5970,6 +5970,231 @@ ordinary tests, not new scenarios."
 
 ---
 
+### Task 23: `DEMO_STEP_MS` — pacing the stages — TAIL, runs before Task 21
+
+§17.1. Found by running the demo: the stubbed stages complete in milliseconds,
+so the stepper jumps 1 → 3 before anyone in the room has read it. The thing
+being demonstrated is visible progress through a long process, and the demo
+was hiding it.
+
+**Files:**
+- Modify: `python/config.py` — one field, one env read
+- Modify: `python/activities/ingest.py`, `python/activities/llm.py`,
+  `python/activities/delivery.py`
+- Modify: `.env.example` — the commented knob, in the demo-profile block
+- Test: `tests/test_demo_pacing.py`
+
+**Interfaces:**
+- Consumes: `config.settings()`
+- Produces: `config.demo_pause(multiplier)` — awaited by the four activities
+
+**Two rules from §17.1 that the code must not get wrong:**
+
+1. **`await asyncio.sleep()`, never `time.sleep()`.** Every activity here is
+   `async def` and the worker registers no `activity_executor`, so they share
+   one event loop — a blocking sleep stalls every other activity, every
+   workflow task and the pollers. `core_banking/app.py` uses `time.sleep` for
+   `CORE_SLOW_MS` and is right to; its routes are sync `def` and FastAPI runs
+   them in a threadpool. Do not copy it here.
+2. **Nothing in `python/workflows/`.** A `workflow.sleep()` would put
+   `TimerStarted`/`TimerFired` in all nine committed histories and break the
+   §16.5 replay gate. Activity duration adds no events.
+
+And **nothing on `open_account`** — its 5s `start_to_close_timeout` is §10.1's
+ambiguous-timeout beat.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_demo_pacing.py
+"""§17.1 — the stages are padded so a live audience can watch them."""
+import asyncio
+import inspect
+import time
+from pathlib import Path
+
+import pytest
+
+from python import config
+
+ROOT = Path(__file__).resolve().parents[1]
+PACED = {
+    "python/activities/ingest.py": "ingest_documents",
+    "python/activities/delivery.py": "send_documents",
+}
+
+
+def test_demo_pause_is_off_by_default(monkeypatch):
+    """Default 0 keeps `make verify` at its current runtime. A suite that
+    pays the demo's pacing is a suite people stop running."""
+    monkeypatch.delenv("DEMO_STEP_MS", raising=False)
+    assert config.settings().demo_step_ms == 0
+
+
+@pytest.mark.asyncio
+async def test_demo_pause_returns_immediately_when_unset(monkeypatch):
+    monkeypatch.delenv("DEMO_STEP_MS", raising=False)
+    started = time.perf_counter()
+    await config.demo_pause(2)
+    assert time.perf_counter() - started < 0.05
+
+
+@pytest.mark.asyncio
+async def test_demo_pause_scales_by_its_multiplier(monkeypatch):
+    monkeypatch.setenv("DEMO_STEP_MS", "40")
+    started = time.perf_counter()
+    await config.demo_pause(2)
+    elapsed = time.perf_counter() - started
+    assert 0.06 <= elapsed < 0.5, elapsed
+
+
+@pytest.mark.asyncio
+async def test_demo_pause_yields_the_event_loop(monkeypatch):
+    """The whole point. A `time.sleep` here would stall every other activity,
+    every workflow task and the worker's pollers, because the activities are
+    `async def` sharing one loop. If this pause yields, other coroutines make
+    progress while it waits."""
+    monkeypatch.setenv("DEMO_STEP_MS", "60")
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.005)
+            ticks += 1
+
+    task = asyncio.create_task(ticker())
+    await config.demo_pause(1)
+    task.cancel()
+    assert ticks > 2, f"the pause blocked the loop; only {ticks} ticks"
+
+
+def test_no_blocking_sleep_in_any_activity():
+    """§17.1. `time.sleep` in an `async def` activity blocks the shared loop.
+    Written as a source grep because the failure is silent: everything still
+    works, just serially and slowly, and no test would otherwise notice."""
+    offenders = []
+    for path in (ROOT / "python" / "activities").rglob("*.py"):
+        for n, line in enumerate(path.read_text().splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if "time.sleep" in code:
+                offenders.append(f"{path.name}:{n}")
+    assert not offenders, f"blocking sleep in an async activity: {offenders}"
+
+
+def test_the_paced_activities_await_the_pause():
+    """A pause nobody calls is a knob that does nothing."""
+    missing = [f for f, _ in PACED.items()
+               if "demo_pause(" not in (ROOT / f).read_text()]
+    assert not missing, f"not paced: {missing}"
+
+
+def test_live_extraction_is_not_padded():
+    """§17.1 — a live model call already takes real seconds. Only the
+    fixture-backed path is padded."""
+    src = (ROOT / "python" / "activities" / "llm.py").read_text()
+    live = src[src.index("async def live_call_llm"):src.index("async def fixture_call_llm")]
+    assert "demo_pause(" not in live
+    assert "demo_pause(" in src[src.index("async def fixture_call_llm"):]
+
+
+def test_open_account_is_never_padded():
+    """§10.1 — its 5s start_to_close_timeout IS the headline beat. Padding it
+    either eats the margin or fires the timeout spuriously."""
+    src = (ROOT / "python" / "activities" / "core_banking.py").read_text()
+    assert "demo_pause(" not in src
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `uv run pytest tests/test_demo_pacing.py -q`
+Expected: fails on `config.settings().demo_step_ms` — `Settings` has no such
+field, and `config.demo_pause` does not exist.
+
+- [ ] **Step 3: Add the setting and the helper**
+
+`python/config.py` — one field on `Settings`, one read in `settings()`, and the
+helper beside them:
+
+```python
+# --- in the Settings dataclass, next to core_slow_ms -----------------------
+    demo_step_ms: int
+
+# --- in settings() ---------------------------------------------------------
+        demo_step_ms=int(env("DEMO_STEP_MS", "0")),
+
+
+async def demo_pause(multiplier: float = 1.0) -> None:
+    """§17.1. Pad a stubbed stage so a live audience can watch it happen.
+
+    `asyncio.sleep`, not `time.sleep`: the activities are `async def` sharing
+    one event loop, and a blocking sleep would stall every other activity, the
+    workflow tasks and the pollers. And this belongs in an activity, never in
+    a workflow -- activity duration adds no history events, where a durable
+    timer would rewrite all nine committed histories (§16.5).
+    """
+    ms = settings().demo_step_ms
+    if ms:
+        await asyncio.sleep(ms * multiplier / 1000)
+```
+
+Add `import asyncio` at the top of `config.py`.
+
+- [ ] **Step 4: Pace the four activities**
+
+Each call goes **first**, before the real work, so the activity is visibly
+Running while it "works" rather than pausing after it has already finished.
+
+| File | Activity | Call |
+|---|---|---|
+| `activities/ingest.py` | `ingest_documents` | `await config.demo_pause(2)` |
+| `activities/llm.py` | `fixture_call_llm` **only** | `await config.demo_pause(1)` |
+| `activities/delivery.py` | `send_documents` | `await config.demo_pause(1)` |
+| `activities/delivery.py` | `notify` | `await config.demo_pause(0.5)` |
+
+`live_call_llm` and `open_account` get nothing.
+
+- [ ] **Step 5: Run the pacing tests**
+
+Run: `uv run pytest tests/test_demo_pacing.py -q`
+Expected: 8 passed.
+
+- [ ] **Step 6: Confirm the suite did not slow down**
+
+Run: `make verify`
+Expected: `VERIFY OK: 22/22`, and a runtime within a second or two of the
+previous run. `DEMO_STEP_MS` is unset there, so every pause returns immediately.
+
+- [ ] **Step 7: Document the knob**
+
+`.env.example`, in the demo-profile block beside `CORE_SLOW_MS`:
+
+```
+# Pad the stubbed stages so a live audience can watch the stepper advance
+# (§17.1). 0 disables it, which is what the test suite runs with.
+# DEMO_STEP_MS=1500
+```
+
+- [ ] **Step 8: Watch it in the live stack**
+
+```bash
+DEMO_STEP_MS=1500 make demo
+```
+
+Submit, and watch the stepper move 1 → 2 → 3 at a readable pace. Confirm in the
+Temporal UI that `ingest_documents` sits in **Running** for ~3s with its
+summary showing — that is the pacing doing its job, and it is the frame §12
+wants the audience looking at. Then `make down`.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add python/config.py python/activities/ tests/test_demo_pacing.py .env.example
+git commit -m "feat: DEMO_STEP_MS paces the stubbed stages — §17.1"
+```
+
+---
+
 ### Task 21: Final verification and the README — TAIL, sequential, runs AFTER Task 22
 
 **Files:**
