@@ -1048,3 +1048,520 @@ empty string, so the SDK sees a key, fails auth, and `llm.py` classifies a 401
 as a non-retryable `ClientError` — not the `AuthenticationError` its TypeError
 clause raises for genuinely absent credentials. Both are non-retryable and both
 name the problem, so this is documented rather than fixed.
+
+---
+
+## R-021 — the tracker: a broken test, and a failed run that read as a finished one
+
+*Renumbered from R-017 when this branch merged `main`. Main's R-017 — the Task
+13–17 review — landed in parallel while this branch sat unmerged, so both sides
+wrote an R-017, an R-018 and an R-019 with different content. Commit `1ae82f5`'s
+message calls this one R-017; history is not rewritten to match.*
+
+**Task 18.**
+
+**1. The plan's test could not pass as written.** It builds
+`{l.split(" ", 1)[1]: l[0] for l in out.splitlines() ...}` and then looks up
+`lines["KYC review"]`. The current step's line is
+`"→ KYC review — awaiting the KYC analyst"`, so splitting on the first space
+gives the key `"KYC review — awaiting the KYC analyst"` and the lookup raises
+`KeyError`. The marker map is now built by matching each line against
+`tracker.STEPS`, which does not care what follows the step name.
+
+**2. The plan's tracker rendered a failed onboarding as seven ticks.** Its
+`TERMINAL = {"complete", "manual_intervention", "rejected_by_core"}` marks every
+step ✓ for any terminal stage. So an application rejected three times, or turned
+down by core banking, showed in the Temporal UI as a completed seven-step
+process. That is precisely the confusion R-011 fixed in the console — a finished
+process with a bad outcome is not a finished process with a good one — and §10.3
+rests on the distinction.
+
+`FAILED_AT` now maps `manual_intervention`→step 2 and `rejected_by_core`→step 3,
+the same indices R-011 chose for the console, and the run renders ✓ up to that
+step, ✗ at it, ○ after. One `stage` value, two surfaces, **and now the same
+reading on both** — which was the point of §12. Pinned by
+`test_a_failed_terminal_stage_says_so_rather_than_showing_seven_ticks`.
+
+## R-022 — R-014's deferred half, done: the field table is editable
+
+*Renumbered from R-018 on the same merge — see R-021. Commit `1ae82f5`'s
+message calls this one R-018.*
+
+**Task 18**, as R-014 assigned it.
+
+`fieldRows` now emits a dotted `data-path` per cell — `tax_id`,
+`beneficial_owners[1].dob`, `control_person.title` — and a click turns the value
+into an input. Enter or blur commits into a `corrections` map, Escape abandons.
+On approve, corrections join the gap edits in the same `field_edits` array, with
+a guard so a field that is both a gap and a table edit is sent once. Edited
+cells are marked, so the analyst can see their own delta before approving —
+§9.1's audit rule made visible at the point of decision.
+
+**Verified in a real browser, not only by grep.** The console's tests read the
+page as text, so they would pass against a page whose JavaScript does not run.
+Chromium was driven against the page with the gateway's responses stubbed: open
+the collapsed table, correct `tax_id` (not a gap), fill the real gap, attest,
+approve — and the intercepted request body carried both entries and no page
+errors. The payload is exactly the shape Task 15's validator accepts.
+
+## Promoted to rules
+
+**A test that greps a page proves the string is there, not that the page
+works** — added to `testing.md`. Second occurrence: the console's Task 8 suite
+has always been substring assertions, and this task added four more of them
+before anything checked that the feature functioned. `node --check` on the
+extracted script catches a syntax error in seconds; a headless browser catches
+the rest.
+
+---
+
+## R-023 — Task 19 is blocked on the API key; the recorder is built and verified as far as it can be
+
+*Renumbered from R-019 on the same merge — see R-021. Commit `5c217c1`'s
+message calls this one R-019, and `testing.md`'s promoted `sys.path` rule cites
+that number too.*
+
+**Task 19.** §16.7 step 2 records the fixtures by running the extraction loop
+live. `ANTHROPIC_API_KEY` is not set in this environment, so the recording did
+not happen. What could be done without it was done.
+
+**1. `make fixtures` would have failed on its first line.** `record_fixtures.py`
+is the first tool to import from the `python` package, and
+`uv run python tools/record_fixtures.py` puts `tools/` on `sys.path`, not the
+repo root — so `from python import config` raises `ModuleNotFoundError` before
+the key is even checked. pytest never sees this because `pyproject.toml` sets
+`pythonpath = ["."]` for the test run only; `make_documents.py` never saw it
+because it imports nothing from the package. Fixed with an explicit
+`sys.path.insert` and a comment, so the script works via `make` and when run
+directly. **Task 20's `capture_histories.py` will hit exactly this** — promoted
+to `testing.md` on that basis.
+
+**2. The recorder now says when a recording is unusable.** §8.4's missing date
+of birth is the demo's escalation beat, and the plan's Step 4 says that if the
+run does not escalate it, fix the prompt and re-record rather than hand-edit.
+Nothing said so at the point of recording. The script now prints a warning
+naming the failure and the correct remedy, because the person running this is
+running it once and will not have the plan open.
+
+**3. The tests skip rather than fail until the fixtures exist.**
+`pytest.mark.skipif(not FIXTURES.exists())` with the reason naming
+`make fixtures` and the key. The suite stays green and `make verify` stays
+correctly red — the five skips are the remaining work, which is what that gate
+is for. Committing five failing tests would have made the suite meaningless as
+a signal for everything else.
+
+**What is left:** run `make fixtures` with a key set, review the recorded JSON
+in the diff, commit it. The suite is keyless from then on. Task 20 needs the
+fixtures in place before it can capture histories, so the build is blocked here
+until someone supplies the key.
+
+---
+
+## R-024 — two defects the first live run found, both invisible to every stub
+
+**Task 19.** R-023 left this task blocked on the API key. With the key supplied
+(R-020's `.env`), `make fixtures` failed twice before it recorded anything, on
+two faults that had been sitting in merged, green code. Both were unreachable
+from the suite for the same reason, which is the part worth keeping.
+
+### 1. The agent loop ended its transcript on an assistant turn
+
+    anthropic.BadRequestError: 400 — This model does not support assistant
+    message prefill. The conversation must end with a user message.
+
+`call_llm` renders an `AgentTurn` with `role="assistant"` as an assistant
+message. The loop appended the model's action as an assistant turn on every
+iteration, but appended the **tool's result** only when `request_documents`
+named an unknown id. So the success path — the normal path — left the
+transcript ending on an assistant turn, which is an assistant *prefill*.
+Prefill was removed across the 4.6+ family, `claude-sonnet-5` included: it is a
+permanent 400, not a transient one.
+
+Iteration 1 always worked (`turns` is empty, so the request is a lone user
+message) and iteration 2 always failed. Any run that read a document — again,
+the normal path — hit it.
+
+**Fixed at the loop, not at the boundary.** `document_tool_turn()` now records
+the result of *every* `request_documents` call, granted ids and unknown ids
+alike. That is the correct tool-loop shape independently of the API rule, and
+the API rule then falls out of it. Ids only, never text (§8.2), and it also
+covers an empty `doc_ids`, which would otherwise send an empty content block —
+a different 400 on the same call.
+
+`tools/record_fixtures.py` hand-rolls this loop, because §16.7 records without
+a Temporal server, and it had the identical omission. It now imports
+`document_tool_turn` rather than keeping a second copy of the rule.
+
+**This changes the child's history shape.** Task 20 captures the T-REPLAY
+histories through this loop, so it must run after this fix — a history captured
+last week would encode the broken transcript.
+
+### 2. The terminal tools told the model nothing about the payload shape
+
+`submit_extraction` and `escalate` declared `application` and `gaps` as bare
+`{"type": "object"}`. Handed no schema, the model answered with `field` instead
+of `field_path`, `'Passport'` instead of the `passport` enum, `'30%'` for a
+`Decimal`, and a flat string where an `Address` belongs. Pydantic rejected all
+of it.
+
+**The failure mode is worse than the error suggests.** §10.2 classifies
+MalformedResponse as *retryable*, so in the workflow — rather than in the
+recorder's `ActivityEnvironment`, which does not retry — that same impossible
+call retries on an unlimited policy. The demo would not have shown an error; it
+would have hung, which `workflow-determinism.md` already warns is what a defect
+on this path looks like.
+
+`payloads-and-activities.md` had required the fix all along: Pydantic
+"generates the JSON schema handed to Claude for structured extraction". It now
+does, via `prompts._terminal_payload_schema()`, with `$defs` hoisted to the
+schema root where the generated `$ref`s resolve. Generated rather than
+transcribed, so a new field on `ApplicationFields` teaches the model about it
+in the same commit.
+
+### Why the suite could not have caught either
+
+Every test of `call_llm` hands `_create_message` a payload **that already
+matches the Pydantic models**, and every test of the child stubs the activity
+out entirely. Both are correct tests of the code they cover, and both are
+structurally blind to the two things that broke: the shape of the request that
+goes out, and the schema the model is given. Stubs test our side of a contract;
+only a live call tests the contract.
+
+Two new tests close the specific holes — the transcript's last turn, and the
+schema as it reaches `_create_message` rather than as written in the constant —
+and the general lesson is promoted to `testing.md` below.
+
+## Promoted to rules
+
+**A stub proves our side of a contract, not the contract** — added to
+`testing.md`. Second occurrence in this family: R-022 promoted *"a test that
+greps a page proves the string is there, not that the page works"* for the
+console, and this is the same fault one layer down. The remedy is the same
+shape too — run the real thing once, deliberately, and assert on what crosses
+the boundary.
+
+**Never let the transcript end on an assistant turn** — added to
+`payloads-and-activities.md`, on the *"it will bite a task you can name"*
+clause: Task 20 replays this loop, and every future tool has to record its
+result or reintroduce the same 400.
+
+## R-025 — `make up` started nothing, and said it had
+
+**Task 20.** The first task that needs a live stack, and the stack would not
+start. `make up` printed all three URLs and `make status` then reported four
+stopped processes.
+
+**The problem.** R-001 fixed half of this and the other half survived, because
+only the half `make status` exercised was ever run. `pgrep -f` matches whole
+command lines, and the start recipes contain BOTH the guard pattern and the
+command they start:
+
+```make
+@pgrep -f "[t]emporal server start-dev" >/dev/null 2>&1 || \
+	(nohup temporal server start-dev --ui-port 8233 > ... &)
+```
+
+R-001's bracket idiom stops the *pattern* from matching itself. It does nothing
+about the second occurrence: `nohup temporal server start-dev` is in the same
+recipe, so it is in the same command line, and the regex `[t]emporal server
+start-dev` matches it. The guard finds the recipe's own shell, concludes the
+process is already running, and the `||` branch never fires. Reproduced
+directly:
+
+```
+$ sh -c 'pgrep -af "[t]emporal server start-dev" || echo NOMATCH; true "nohup temporal server start-dev"'
+2852 sh -c pgrep -af "[t]emporal server start-dev" || echo NOMATCH; true "nohup temporal server start-dev"
+```
+
+All four processes had it — `[c]ore_banking.app:app` against `uvicorn
+core_banking.app:app`, `[w]eb.gateway:app` against `uvicorn web.gateway:app`,
+`[p]ython.worker` against `python -m python.worker`. `make demo` was therefore
+inert, on stage as much as here. `down`, `kill-worker` and `status` were never
+affected: their recipes carry the bracketed pattern and nothing else.
+
+**The ruling.** No regex fixes this — any pattern that matches the real
+process's command line also matches the recipe text that starts it, and Make
+expands its variables before the shell ever runs, so the literal is always
+there. The command has to stop being part of a command line, so it moves into a
+file: `make/start.sh <name>`, one `case` arm per process, invoked by each of
+the four targets. That process shows up as `sh make/start.sh temporal`, which
+no guard pattern matches, and the guard inside the script sees only real
+processes.
+
+**Authority.** Spec §14 mandates "`pgrep` guards so targets are idempotent" —
+the mechanism, not its location. The guards are still pgrep guards and the
+targets are still idempotent; they now also work.
+
+**The cost.** One more file, and `make up` no longer reads as a self-contained
+description of what it starts. Worth it: the alternative is a demo entry point
+that lies, which is what §10.4's worker-kill beat runs through.
+
+## Promoted to rules
+
+**A `pgrep` guard must not share a command line with the command it guards** —
+new file `.claude/rules/stack-and-make.md`, scoped to `Makefile`, `make/**` and
+`python/Makefile`. This is the rule of two, clause 1: R-001 and R-025 are the
+same fault, eight tasks apart, and the second one hid because the first one's
+verification (`make status`) could not reach it. The rule carries the check
+that would have caught both — start it, then ask the system, not the recipe.
+
+## R-026 — the fixture recording is indexed by model calls, not by turns
+
+**Task 20.** With the stack finally up, all three onboarding attempts failed
+inside a second:
+
+    FixturesExhausted: fixtures/acme-corp.json records 2 responses but the
+    agent is on turn 3
+
+**The problem.** `fixture_call_llm` selected its response with
+`sequence[len(req.turns)]`. One recorded response is one model CALL, and a call
+contributes exactly one *assistant* turn — but the transcript also carries tool
+turns. R-024 made `request_documents` record its result on every path, so
+iteration 1 leaves two turns behind, and iteration 2 asks for `sequence[2]` of
+a two-response recording. The committed fixture is exactly that shape
+(`request_documents`, then `submit_extraction`), so **every** fixture-mode run
+died on its second call, three attempts deep, and the parent completed as
+`manual_intervention` — a business status, correctly, which is why nothing
+crashed and nothing looked obviously wrong.
+
+**The ruling.** Count the calls, not the turns:
+
+```python
+call = sum(1 for turn in req.turns if turn.role == "assistant")
+```
+
+Fixed in the activity rather than by padding the recording: the recorder writes
+one entry per call, which is the honest unit, and a fixture edited to line up
+with a wrong index is the exact failure §16.7 exists to prevent.
+
+**Why the suite was green.** `test_fixture_mode_advances_with_the_turn_count`
+hand-built a transcript of one assistant turn — a shape
+`ExtractionAgentWorkflow` never produces after a `request_documents` — and the
+implementation agreed with it. The test and the code shared one wrong
+assumption about what a turn is, so they confirmed each other. Third occurrence
+of R-024's family, and the same shape: everything that touched the loop was a
+stub, and the one thing that would have caught it was running the real loop
+against the real recording.
+
+**The cost.** Three tests. Two on the activity — the real two-turn shape, and a
+tool result not consuming a response — and one that is the general remedy:
+`test_the_committed_fixture_drives_the_real_loop` runs the actual child
+workflow with the actual `fixture_call_llm` over `fixtures/acme-corp.json` and
+asserts two iterations ending in §8.4's gap. All three fail against the old
+index; the third is the one that would have found it unprompted.
+
+## R-027 — four defects in the plan's Task 20 code
+
+**Task 20.** The plan supplies `tools/capture_histories.py` and
+`tests/test_replay.py` in full. Four things in them do not survive contact with
+this repository, and three of the four present as something other than
+themselves.
+
+**1. The replayer was handed a random workflow id.** The plan calls
+`WorkflowHistory.from_json(str(uuid.uuid4()), ...)`. That first argument is the
+**workflow id**, not a label, and the parent derives its child's id from
+`workflow.info().workflow_id` (§7). Replaying under an invented id therefore
+fails with:
+
+    Nondeterminism error: Child workflow id of scheduled event
+    'onboarding-acme-corp-extract-1' does not match child workflow id of
+    command '5235fd34-…-extract-1'
+
+— a determinism failure in code nobody had touched, which is the worst possible
+false positive for this particular gate. The started event carries the real id;
+`_workflow_id()` reads it out of the history rather than deriving it from the
+file name, which would drift.
+
+**2. `_save` fetched child histories by id, and ids outlive runs.** Child ids
+are derived from the parent id, so `onboarding-acme-corp-extract-2` exists as
+soon as *any* earlier run reached attempt 2. The first capture attempt failed
+three attempts deep (R-026), and the next capture dutifully filed those dead
+children under `happy-path-extract-2.json` and `-3` — a happy path that
+records two extra extraction attempts it never made, committed as a
+determinism gate. `_save` now reads `ChildWorkflowExecutionStarted` out of the
+parent's own history and fetches each child by (id, **run id**).
+
+**3. `_wait` matched the stage it was trying to leave.** The plan polls for a
+stage name. After a rejection the workflow is still `awaiting_review` on
+attempt 1 until it re-ingests, so the reject-loop scenario's second wait
+returned immediately and submitted the approval into attempt 1's already-closed
+review. `_wait` now takes a predicate, and that scenario waits for
+`awaiting_review AND attempt == 2`.
+
+**4. The manifest wrappers spun their own event loop.** The plan's stubs call
+`asyncio.new_event_loop().run_until_complete(...)` inside a sync test. Every
+other async scenario in `test_manifest.py` is an `async def` delegating to an
+`assert_*` helper, and pytest-asyncio is in auto mode. Followed the file's own
+convention.
+
+Also: the tool now `sys.path.insert`s the repo root (`testing.md`'s rule for
+`tools/`, which the plan's version would have tripped on immediately), and
+`_reset` terminates a leftover open run — the escalation scenario deliberately
+leaves one, so without that a second `make histories` wedges on the 409 the
+workflow id exists to produce.
+
+**No promotion.** Defects 1 and 2 are specific to replay capture and are
+recorded in `histories/README.md`, next to the files they explain. Defect 3 is
+already covered by the "hanging test is a retry loop" habit — read the state,
+do not assume the transition. Defect 4 is a convention the file states itself.
+
+## R-028 — 23 setup errors that were the demo stack, not the suite
+
+> **Superseded in part by R-030.** The reading below — that the demo stack
+> caused it — did not survive the next occurrence, which happened with the
+> stack down. The symptom and its shape (one fixture, 23 errors) still
+> hold; the cause and the remedy are in R-030.
+
+**Task 20, verification.** `make verify` came back with `184 passed, 23
+errors`, every error at fixture *setup*:
+
+    RuntimeError: Failed starting Temporal dev server: Failed connecting to
+    test server after 5 seconds … ConnectionRefused
+
+**The cause.** The demo stack was still up from the capture — dev server,
+worker, gateway, core banking — and the suite starts a dev server of its own
+with a five-second connect budget. Under that much company it lost the race.
+The identical command passed with `make down` first: **207 passed, 0 skipped**.
+
+R-019 chased this same message to a different cause (one server per *test*,
+racing its own ports) and fixed it by making the `env` fixture session-scoped.
+That fix stands; this is a second way to spend the same five seconds, and the
+suite cannot do anything about it because the contention is outside it.
+
+**The ruling.** No code change. `make down` before `make verify`, recorded in
+`.claude/rules/stack-and-make.md` alongside R-025, because the failure looks
+like a broken fixture and is not one — and an agent that reads it as a fixture
+bug will "fix" a fixture that was right.
+
+## R-029 — the root Makefile includes rather than forwards; the spec changed
+
+**Task 20, in review.** Reading the Makefile, the reviewer could not find `up`,
+`down`, `worker` or `kill-worker` in it — correctly, because the root file held
+no recipes at all:
+
+```make
+up down status logs demo demo-reset worker kill-worker restart-worker \
+gateway core-banking temporal test verify fixtures histories documents clean deps:
+	@$(MAKE) --no-print-directory -C python $@
+```
+
+One rule with nineteen target names, forwarding each to `python/`, which
+included `make/common.mk`, which held the actual recipes. Two hops from a
+target's name to what it does, and the name written three times — the rule, the
+`.PHONY` line, and `common.mk`.
+
+**The change.** The root `Makefile` is now `include make/common.mk`;
+`python/Makefile` stays `include ../make/common.mk`. `common.mk` gained
+`.DEFAULT_GOAL := up`, which the forwarder used to carry, and which an include
+does not supply on its own — the first target here is `deps`. Nothing forwards,
+so no target list exists twice.
+
+`ROOT` already made this work: it resolves through the included file's own path
+in `MAKEFILE_LIST`, so it is the repo root from either entry point, and every
+recipe uses `$(ROOT)` rather than the working directory. Verified from both:
+same default goal, same absolute paths, and a full `up` / `status` /
+`demo-reset` / `down` cycle from the root.
+
+**Authority — and this one is different from every other ruling here.** The
+rest of this log records decisions taken *within* the spec. This one changes
+it: §15's layout line read "`Makefile` — forwards to python/", and a ruling
+cannot overrule the binding authority. So the spec was amended first (§14 gains
+the one-definition-two-entry-points paragraph and the rejected alternative, §15
+the new layout line), then the plan's file table and Task 1 Step 6, then the
+code. The decision was the repository owner's, made in review; the ordering is
+`DEVELOPMENT-PROCESS.md`'s.
+
+**What the old shape bought, and why it was still worth losing.** Forwarding
+made the root file a table of contents: every target visible in one screen. The
+multi-SDK story it was for is served better by the include — a `go/Makefile`
+is the same one line, and the root does not have to choose which SDK to forward
+to. The cost of the old shape was silent: a target added to `common.mk` and not
+to the root's list is simply absent, and reports as `No rule to make target`.
+
+**Promoted** to `.claude/rules/stack-and-make.md`, first occurrence, on the
+"it will bite a task you can name" clause: Task 21 edits the README's command
+list, and re-adding a forwarding rule is exactly the tidy-looking change
+someone makes when they want the target names visible at the root again.
+
+## R-030 — R-028's cause was wrong: the dev server start is just flaky
+
+**Task 20, review follow-up.** R-028 blamed the demo stack for 23 setup errors
+and prescribed `make down` first. The next `make verify` produced the identical
+23 errors **with the stack down**, seconds after it had been stopped. The
+explanation was wrong, so it is withdrawn here rather than left to be believed.
+
+**What was actually measured, on one machine on one day:**
+
+| Observation | Result |
+|---|---|
+| Full suite runs | 6; 2 failed this way, 4 green — same command each time |
+| Failures with the demo stack up / down | one each |
+| `start_local` standalone, back to back | 5 of 5, **0.21s** each — the 5s budget is 20× generous |
+| Consecutive suite runs after the second failure | 3, all `207 passed`, nothing changed |
+| Server binary re-downloaded? | No — cached at `/tmp/temporal-sdk-python-1.32.0` |
+
+So: intermittent, environmental, in the spawning of the ephemeral server, and
+unrelated to anything the suite or the stack does. It is R-019's message for a
+*third* distinct reason, which is worth naming — that message means "a dev
+server did not come up in five seconds" and nothing more specific, and each
+time it has been tempting to read it as a broken fixture.
+
+**The ruling.** Retry the start once, in the `env` fixture. There is no
+configuration fix: the five seconds are compiled into the Rust bridge and
+`WorkflowEnvironment.start_local` exposes no timeout parameter (checked against
+the installed SDK's signature). The retry is narrow — it matches only
+`Failed starting Temporal dev server` and re-raises anything else, so a genuine
+fault still fails on its own traceback rather than a confusing second one.
+
+**Why the fixture and not the caller.** Session scope is what makes this worth
+fixing rather than tolerating: one failed start errors all 23 dependent tests
+at setup, so the blast radius of a hiccup is the entire workflow half of the
+suite, and the failure reads as 23 broken tests to whoever finds it. Same
+reasoning as R-019, which made this fixture session-scoped in the first place.
+
+**The lesson, which is the part worth keeping.** R-028 was written from two
+data points that happened to agree with a plausible story, and the story was
+checked only against the run that suggested it. One contrary run and five
+minutes of measurement was all it took to disprove. **Before promoting a
+diagnosis into `.claude/rules/`, reproduce it deliberately — a rule is read as
+settled fact by everyone who comes after, and a wrong one sends them to fix
+something that was never broken.**
+
+## R-031 — the same flake, the other fixture; and a green gate I did not read
+
+**Immediately after R-030.** The next `make verify` failed with one error, not
+23:
+
+    ERROR at setup of test_T_TIME_01_remind_then_escalate_fire_in_order
+    RuntimeError: Failed starting test server: Failed connecting to test
+    server after 5 seconds …
+
+R-030 retried `env` (`start_local`, the *dev* server) and stopped there.
+`skip_env` calls `start_time_skipping`, which spawns the *test* server — a
+different binary and a different message, the same ephemeral spawn against the
+same five-second budget compiled into the same bridge. One run was enough to
+find it, which says the retry belonged at the shared step from the start.
+
+**The ruling.** `_started_with_one_retry(starter)` takes the starter as an
+argument and both fixtures use it; the guard matches either message and
+re-raises anything else. Naming one starter in a helper for a fault that
+belongs to both was the mistake, and the fix is the shape, not another clause.
+
+**The second half of this, which is worse.** The run that produced this error
+still got committed and pushed. The command was:
+
+```
+make verify 2>&1 | tail -2 && git add -A && git commit …
+```
+
+A pipeline's status is its **last** command's, so `&&` read `tail`'s zero and
+proceeded. `make/common.mk` documents this exact trap directly above the
+`verify` recipe — it is why the recipe routes pytest's status through a file
+rather than through `tee` — and it was still walked into, from outside, on the
+gate that trap was documented for. The commit was docs-only and the suite was
+one flake short of green, so nothing bad shipped; that is luck, not a process.
+
+**Never gate on a piped command's status.** Redirect to a file and read the
+file, or check `${PIPESTATUS[0]}` — and when the gate is `make verify`, run it
+bare and look at the last line before committing. Added to
+`.claude/rules/stack-and-make.md` beside the flake it hid.

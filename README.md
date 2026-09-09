@@ -59,6 +59,10 @@ The key is needed for exactly two things: running the live demo (`make demo`),
 and re-recording the fixtures (`make fixtures`, which §16.7 calls the one
 prerequisite a human must supply, and only once).
 
+`FIXTURE_MODE=1 make demo` runs the whole stack keyless off the committed
+recording — the same path the suite takes, and the mode `make histories`
+captures in. Every step is real except the model call.
+
     cp .env.example .env      # then put the key on the ANTHROPIC_API_KEY line
 
 `make` reads `.env` if it is there and exports it to the worker, gateway and
@@ -72,6 +76,11 @@ that a value in `.env` overrides it.
 
     make deps
     make demo     # → console :8000, Temporal UI :8233, core banking :8001
+    make verify   # the definition of done: green, and nothing skipped
+
+`histories/` holds the committed replay gate. Re-capture it with
+`FIXTURE_MODE=1 make up && make histories` only when the workflows' command
+sequence changes on purpose — `histories/README.md` says what that means.
 
 ## Where the design lives
 

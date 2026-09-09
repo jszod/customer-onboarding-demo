@@ -1,4 +1,17 @@
+# Every target is defined HERE, once (§14, §15). The root `Makefile` and
+# `python/Makefile` are one-line includes of this file, and a second SDK's
+# makefile would be a third. Nothing forwards, so no target list is written
+# twice and none can go missing from a copy.
+#
+# `$(lastword $(MAKEFILE_LIST))` is this file as the includer spelled it --
+# `make/common.mk` from the root, `../make/common.mk` from python/ -- so ROOT
+# is the repo root from either entry point. Every recipe below uses it rather
+# than the working directory, which is what makes that true.
 ROOT := $(shell cd $(dir $(lastword $(MAKEFILE_LIST)))/.. && pwd)
+
+# An include has no first target of its own to become the default, and the
+# first one here is `deps`. Say it instead of inheriting it.
+.DEFAULT_GOAL := up
 
 # Local configuration: `cp .env.example .env`, then edit. Optional -- the
 # leading `-` means a missing file is not an error, so a fresh clone still
@@ -26,29 +39,23 @@ up: temporal core-banking gateway worker
 demo: demo-reset up
 	@echo "  ready — click Submit on the console"
 
+# The four start targets delegate to one script, and that indirection is the
+# whole point: a recipe that greps for `[t]emporal server start-dev` while also
+# CONTAINING `temporal server start-dev` matches its own shell, so the guard
+# always said "already running" and `make up` started nothing. R-001 fixed the
+# pattern; the start command needed a file to live in. See R-025 and
+# make/start.sh.
 temporal:
-	@command -v temporal >/dev/null 2>&1 || \
-		{ echo "Temporal CLI not on PATH — install it with: brew install temporal"; \
-		  echo "(see README Setup; make demo cannot start a dev server without it)"; \
-		  exit 1; }
-	@pgrep -f "[t]emporal server start-dev" >/dev/null 2>&1 || \
-		(nohup temporal server start-dev --ui-port 8233 > /tmp/onboarding-temporal.log 2>&1 & \
-		 sleep 3 && echo "temporal dev server started (UI :8233)")
+	@$(ROOT)/make/start.sh temporal
 
 core-banking:
-	@pgrep -f "[c]ore_banking.app:app" >/dev/null 2>&1 || \
-		(cd $(ROOT) && nohup uv run uvicorn core_banking.app:app --port 8001 \
-		 > /tmp/onboarding-core.log 2>&1 & echo "core banking started (:8001)")
+	@$(ROOT)/make/start.sh core-banking
 
 gateway:
-	@pgrep -f "[w]eb.gateway:app" >/dev/null 2>&1 || \
-		(cd $(ROOT) && nohup uv run uvicorn web.gateway:app --port 8000 \
-		 > /tmp/onboarding-gateway.log 2>&1 & echo "gateway started (:8000)")
+	@$(ROOT)/make/start.sh gateway
 
 worker:
-	@pgrep -f "[p]ython.worker" >/dev/null 2>&1 || \
-		(cd $(ROOT) && nohup uv run python -m python.worker \
-		 > /tmp/onboarding-worker.log 2>&1 & echo "worker started")
+	@$(ROOT)/make/start.sh worker
 
 kill-worker:
 	-pkill -f "[p]ython.worker"
@@ -97,8 +104,12 @@ documents:
 fixtures:
 	cd $(ROOT) && uv run python tools/record_fixtures.py
 
+# Keyless by DEFAULT, not by force: §16.7 captures histories through the
+# recorded fixtures, so a run is reproducible. `FIXTURE_MODE=0 make histories`
+# still captures against the live API deliberately. The worker has to be
+# brought up the same way -- histories/README.md records which it was.
 histories:
-	cd $(ROOT) && uv run python tools/capture_histories.py
+	cd $(ROOT) && FIXTURE_MODE=$${FIXTURE_MODE:-1} uv run python tools/capture_histories.py
 
 # `.llm_down` is the §10.4 outage toggle. It sits beside `.store` rather than
 # inside it (the flag path is DOCUMENT_STORE's PARENT, which defaults to the

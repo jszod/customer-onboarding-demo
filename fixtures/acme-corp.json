@@ -1,0 +1,124 @@
+[
+  {
+    "action": {
+      "kind": "request_documents",
+      "doc_ids": [
+        "articles-of-incorporation",
+        "business-license",
+        "ein-letter",
+        "w9",
+        "ownership-declaration"
+      ],
+      "rationale": "Need to read all available documents to extract required fields for the application."
+    },
+    "turn": {
+      "role": "assistant",
+      "content": "{\"doc_ids\": [\"articles-of-incorporation\", \"business-license\", \"ein-letter\", \"w9\", \"ownership-declaration\"], \"rationale\": \"Need to read all available documents to extract required fields for the application.\"}"
+    },
+    "usage": {
+      "input_tokens": 5035,
+      "output_tokens": 118
+    }
+  },
+  {
+    "action": {
+      "kind": "submit_extraction",
+      "application": {
+        "legal_name": "Acme Holdings LLC",
+        "dba": "Acme Analytics",
+        "entity_type": "LLC",
+        "formation_date": "2019-03-11",
+        "formation_state": "Delaware",
+        "tax_id": "88-1234567",
+        "registered_address": {
+          "line1": "1209 Orange Street",
+          "line2": null,
+          "city": "Wilmington",
+          "state": "DE",
+          "postal_code": "19801",
+          "country": "US"
+        },
+        "business_address": {
+          "line1": "410 Harbor Street",
+          "line2": "Suite 900",
+          "city": "Boston",
+          "state": "MA",
+          "postal_code": "02210",
+          "country": "US"
+        },
+        "industry_code": "541611",
+        "phone": "(617) 555-0142",
+        "website": null,
+        "beneficial_owners": [
+          {
+            "full_name": "Dana Whitfield",
+            "dob": "1978-06-02",
+            "ownership_pct": "55",
+            "residential_address": {
+              "line1": "88 Beacon Street",
+              "line2": null,
+              "city": "Boston",
+              "state": "MA",
+              "postal_code": "02108",
+              "country": "US"
+            },
+            "id_type": "passport",
+            "id_number": "X4419223"
+          },
+          {
+            "full_name": "Marcus Vela",
+            "dob": null,
+            "ownership_pct": "30",
+            "residential_address": {
+              "line1": "17 Chestnut Lane",
+              "line2": null,
+              "city": "Brookline",
+              "state": "MA",
+              "postal_code": "02445",
+              "country": "US"
+            },
+            "id_type": "passport",
+            "id_number": "P8830177"
+          }
+        ],
+        "control_person": {
+          "full_name": "Dana Whitfield",
+          "title": "Managing Member",
+          "dob": "1978-06-02",
+          "residential_address": {
+            "line1": "88 Beacon Street",
+            "line2": null,
+            "city": "Boston",
+            "state": "MA",
+            "postal_code": "02108",
+            "country": "US"
+          },
+          "id_type": "passport",
+          "id_number": "X4419223",
+          "is_authorized_signatory": true
+        }
+      },
+      "gaps": [
+        {
+          "field_path": "beneficial_owners[1].dob",
+          "reason": "Marcus Vela's date of birth is not provided in the ownership declaration or any other document.",
+          "documents_searched": [
+            "articles-of-incorporation",
+            "business-license",
+            "ein-letter",
+            "w9",
+            "ownership-declaration"
+          ]
+        }
+      ]
+    },
+    "turn": {
+      "role": "assistant",
+      "content": "{\"application\": {\"legal_name\": \"Acme Holdings LLC\", \"entity_type\": \"LLC\", \"formation_date\": \"2019-03-11\", \"formation_state\": \"Delaware\", \"tax_id\": \"88-1234567\", \"registered_address\": {\"line1\": \"1209 Orange Street\", \"city\": \"Wilmington\", \"state\": \"DE\", \"postal_code\": \"19801\", \"country\": \"US\"}, \"business_address\": {\"line1\": \"410 Harbor Street\", \"line2\": \"Suite 900\", \"city\": \"Boston\", \"state\": \"MA\", \"postal_code\": \"02210\", \"country\": \"US\"}, \"industry_code\": \"541611\", \"dba\": \"Acme Analytics\", \"phone\": \"(617) 555-0142\", \"beneficial_owners\": [{\"full_name\": \"Dana Whitfield\", \"dob\": \"1978-06-02\", \"ownership_pct\": 55, \"residential_address\": {\"line1\": \"88 Beacon Street\", \"city\": \"Boston\", \"state\": \"MA\", \"postal_code\": \"02108\", \"country\": \"US\"}, \"id_type\": \"passport\", \"id_number\": \"X4419223\"}, {\"full_name\": \"Marcus Vela\", \"dob\": null, \"ownership_pct\": 30, \"residential_address\": {\"line1\": \"17 Chestnut Lane\", \"city\": \"Brookline\", \"state\": \"MA\", \"postal_code\": \"02445\", \"country\": \"US\"}, \"id_type\": \"passport\", \"id_number\": \"P8830177\"}], \"control_person\": {\"full_name\": \"Dana Whitfield\", \"title\": \"Managing Member\", \"dob\": \"1978-06-02\", \"residential_address\": {\"line1\": \"88 Beacon Street\", \"city\": \"Boston\", \"state\": \"MA\", \"postal_code\": \"02108\", \"country\": \"US\"}, \"id_type\": \"passport\", \"id_number\": \"X4419223\", \"is_authorized_signatory\": true}}, \"gaps\": [{\"field_path\": \"beneficial_owners[1].dob\", \"reason\": \"Marcus Vela's date of birth is not provided in the ownership declaration or any other document.\", \"documents_searched\": [\"articles-of-incorporation\", \"business-license\", \"ein-letter\", \"w9\", \"ownership-declaration\"]}]}"
+    },
+    "usage": {
+      "input_tokens": 6498,
+      "output_tokens": 900
+    }
+  }
+]

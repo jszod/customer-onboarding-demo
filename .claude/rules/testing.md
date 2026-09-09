@@ -59,6 +59,24 @@ as real code would.
 This has already happened twice, both times to a docstring the plan itself
 supplied. Write around the string: "a retry counter", not the expression.
 
+## Grepping a page proves the string is there, not that the page works
+
+`tests/test_console.py` reads `web/static/index.html` as text and asserts
+substrings. That is a reasonable structural gate and it is all it is: every one
+of those tests passes against a page whose JavaScript throws on load.
+
+So when you change console behaviour, check the behaviour:
+
+- `node --check` on the extracted `<script>` catches a syntax error in seconds.
+- A headless browser catches the rest. Chromium is available at
+  `/opt/pw-browsers/`, and `uv run --with playwright` gets the driver without
+  touching `pyproject.toml`. Stub the gateway's routes, drive the control, and
+  assert on the intercepted request body.
+
+R-022 did exactly this for the editable field table, and the check is what
+turned "the substring is present" into "the analyst's correction reaches
+`field_edits`".
+
 ## Test environments
 
 Use `WorkflowEnvironment.start_local()` for most tests; it is shareable via a
@@ -77,6 +95,21 @@ takes a fresh uuid4 task queue and every workflow id carries a uuid4, so two
 tests cannot see each other's workflows. A test that pins a fixed workflow id
 or task queue breaks that — check before adding one.
 
+## Fixture mode is a contract too, and it has its own unit
+
+One recorded response is one model **call**, and a call adds one *assistant*
+turn — never the whole transcript, which also carries tool turns. Indexing the
+recording by `len(turns)` skips a response per tool result and dies as
+`FixturesExhausted` on the second call of every real run, while every
+hand-built unit test passes (R-026).
+
+The general form: a fixture-backed activity and the recorder that wrote the
+fixture must agree about the unit, and only running the real loop over the real
+recording proves they do.
+`test_the_committed_fixture_drives_the_real_loop` is that test — the child
+workflow, `fixture_call_llm`, and `fixtures/acme-corp.json`, with nothing
+stubbed. Keep one like it for any loop that fixtures drive.
+
 ## Histories are captured, never authored
 
 `make histories` drives a live stack and downloads the real histories. Do not
@@ -86,7 +119,21 @@ workflow code that breaks determinism — and a hand-authored history guards
 nothing.
 
 Capture the child workflow's history too. A determinism break there is just as
-fatal and just as easy to introduce.
+fatal and just as easy to introduce — and capture it by **run id**, read out of
+the parent's `ChildWorkflowExecutionStarted`. Child ids are derived from the
+parent id (§7), so fetching `onboarding-acme-corp-extract-2` by id alone can
+hand you a dead run from an earlier capture and file it under this scenario's
+name (R-027).
+
+**`WorkflowHistory.from_json`'s first argument is the workflow id**, not a
+label. The parent builds its child's id from `workflow.info().workflow_id`, so
+replaying under an invented id fails as a child-id mismatch — reported as
+nondeterminism in code nobody touched, which is the worst false positive this
+gate can produce. Read the id out of the started event.
+
+A red replay test is a claim about the code, not about the file. Re-capturing
+to make it green is how the gate stops guarding: read the failure first, and
+re-capture only once you know the command sequence changed on purpose.
 
 ## `make test` needs no API key
 
@@ -97,3 +144,37 @@ it belongs in `make test-live`, not the default suite.
 
 After wiring the determinism guard and the replay tests, deliberately break
 determinism once, watch the gate fail, and revert.
+
+## A script in `tools/` needs the repo root on `sys.path` itself
+
+`pyproject.toml`'s `pythonpath = ["."]` applies to pytest, not to
+`uv run python tools/whatever.py` — that puts `tools/` on the path, so any
+`from python import ...` raises `ModuleNotFoundError` before the script's own
+checks run. Every `make` target here invokes these as plain scripts.
+
+Start any tool that imports the package with:
+
+```python
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+```
+
+`record_fixtures.py` shipped without it and would have failed on the one step a
+human has to run themselves (R-023).
+
+## A stub proves our side of a contract, not the contract
+
+Every `call_llm` test hands `_create_message` a payload that already matches the
+Pydantic models, and every child-workflow test stubs the activity out. Both are
+correct, and both are blind to the two things a live call actually checks: the
+shape of the request that goes out, and the schema the model is handed. R-024
+found two merged, green defects that way — a transcript ending on an assistant
+turn (a permanent 400) and terminal tools declaring `{"type": "object"}` for
+their payloads.
+
+So: assert on **what crosses the boundary**, not on the constant that feeds it.
+Capture the kwargs `_create_message` receives and assert on those — a schema
+written correctly in `prompts.TOOLS` but never sent is worth nothing.
+
+And run the real thing once, deliberately, when a task first makes it possible.
+`make fixtures` is that run for the model call. Same shape as R-022's rule for
+the console: grepping the page is not driving it.

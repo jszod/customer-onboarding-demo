@@ -30,6 +30,7 @@ with workflow.unsafe.imports_passed_through():
     from python.models.onboarding import (ApplicationRequest, OnboardingResult,
                                           OnboardingStatus)
     from python.models.review import ReviewAck, ReviewSubmission
+    from python.workflows import tracker
 
     # Read ONCE, here. `settings()` reads os.environ, which the sandbox forbids
     # during execution -- and a workflow that re-read its config mid-run would
@@ -63,12 +64,21 @@ class OnboardingWorkflow:
         self._last_error: str | None = None
         self._client_id_chase = 0
 
+    def _track(self, req: ApplicationRequest, detail: str | None = None) -> None:
+        """§12. One `stage` value, two surfaces: the console draws a stepper
+        and the Temporal UI shows this. Pure string building, so it is safe
+        from workflow code."""
+        workflow.set_current_details(
+            tracker.render(self._stage, self._attempt, req.legal_name,
+                           self._gaps, detail))
+
     # ---------------------------------------------------------------- run
 
     @workflow.run
     async def run(self, req: ApplicationRequest) -> OnboardingResult:
         while self._attempt <= SETTINGS.max_attempts:
             self._stage = "ingesting"
+            self._track(req)
             try:
                 manifest = await workflow.execute_activity(
                     "ingest_documents",
@@ -82,6 +92,7 @@ class OnboardingWorkflow:
                                           f"{_failure_message(e)}")
 
             self._stage = "extracting"
+            self._track(req)
             try:
                 extraction: ExtractionResult = await workflow.execute_child_workflow(
                     "ExtractionAgentWorkflow",
@@ -108,6 +119,7 @@ class OnboardingWorkflow:
             self._stage = "awaiting_review"
             self._pending_since = workflow.now()
             self._review = None
+            self._track(req)
             await self._await_review(req)
             review = self._review
             assert review is not None
@@ -144,6 +156,7 @@ class OnboardingWorkflow:
         """Filled in by Task 16. Kept as a separate method so Task 16 touches
         one place and Task 14's tests keep passing."""
         self._stage = "submitting_to_core"
+        self._track(req)
 
         # A workflow-level retry loop, NOT the activity retry policy. §10.2's
         # table describes the policy shape -- initial 1s, backoff 2.0, max
@@ -192,11 +205,13 @@ class OnboardingWorkflow:
 
         self._stage = "awaiting_client_id"
         self._pending_since = workflow.now()
+        self._track(req)
         await self._await_client_id(req)
         assignment = self._client_id_assignment
         assert assignment is not None
 
         self._stage = "sending_documents"
+        self._track(req)
         packet: SendDocumentsResult = await workflow.execute_activity(
             "send_documents",
             SendDocumentsRequest(client_key=req.client_key,
@@ -214,6 +229,7 @@ class OnboardingWorkflow:
                       client_id: str | None, detail: str,
                       packet_uri: str | None = None) -> OnboardingResult:
         self._stage = "notifying"
+        self._track(req, detail)
         recipients = (["onboarding_specialist", "end_client"]
                       if status == "completed"
                       else ["onboarding_specialist", "supervisor"])
@@ -226,6 +242,7 @@ class OnboardingWorkflow:
             start_to_close_timeout=timedelta(seconds=30),
             summary=f"Notify {', '.join(recipients)}")
         self._stage = "complete" if status == "completed" else status
+        self._track(req, client_id or detail)
         return OnboardingResult(status=status, client_id=client_id,
                                 attempts=self._attempt, detail=detail)
 

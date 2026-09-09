@@ -901,6 +901,20 @@ artifact, or a workshop where fifteen laptops' Python installs cannot be
 debugged. If that happens, follow canonical's precedent — Dockerfiles under
 `docker/` for deployment, kept out of the local dev path.
 
+**Every target is defined once, in `make/common.mk`, and entry points include
+it.** The root `Makefile` is `include make/common.mk`; `python/Makefile` is
+`include ../make/common.mk`; a second SDK's `go/Makefile` would be the same
+line again. Each recipe derives the repo root from the included file's own path
+and works from any directory, so where you invoke `make` does not change what
+it does.
+
+The rejected alternative is a root `Makefile` that *forwards* each target to
+`python/` with `$(MAKE) -C python $@`. It works, and it costs a second copy of
+the target list at the root (a third, counting `.PHONY`) plus a hop between the
+name and the recipe. A target added to `common.mk` and not to the root list is
+then simply missing, with no error to say so. Naming a target twice to reach it
+once is the coupling this split exists to avoid.
+
 ## 15. Repository layout
 
 Mirrors `canonical-ai-demo`'s split so a second SDK can be added without
@@ -911,8 +925,8 @@ CLAUDE.md                  run/test commands, task queue, IDs, determinism rule
 CONTRACT.md                the §6 wire surface, SDK-agnostic
 TALK_TRACK.md              the narration for a live or design-only walkthrough
 docs/DESIGN-DIAGRAMS.md    three annotated mermaid diagrams (§21)
-Makefile                   forwards to python/
-make/common.mk             shared process management
+Makefile                   one line: `include make/common.mk`
+make/common.mk             every target, defined once; shared process management
 documents/acme-corp/       committed sample PDFs (text-layer)
 fixtures/                  recorded call_llm responses
 histories/                 committed workflow histories for replay tests

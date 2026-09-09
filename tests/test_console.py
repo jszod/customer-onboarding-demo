@@ -106,6 +106,33 @@ def test_review_payload_matches_review_submission():
     assert "kyc-analyst-1" in b
 
 
+def test_field_edits_carry_corrections_to_already_extracted_fields():
+    """R-014 — `field_edits` is not scoped to gaps. §9.1 chose an update over a
+    signal because the analyst edits field values, and correcting one the model
+    read wrongly is the ordinary case in KYC review."""
+    b = body()
+    assert "corrections" in b, "no store for edits to non-gap fields"
+    # The dotted paths the validator's apply_edits walks.
+    assert "beneficial_owners[" in b
+    assert "control_person." in b
+    # Corrections must reach the same field_edits array the gaps build.
+    assert "field_edits.push" in b
+
+
+def test_a_corrected_field_is_not_sent_twice():
+    """A gap the analyst also edits in the table must produce one entry."""
+    b = body()
+    assert "field_edits.some" in b
+
+
+def test_the_extracted_fields_table_is_editable():
+    """The other half of R-014: the table renders as editable cells, not text."""
+    b = body()
+    assert "cell-edit" in b
+    assert "data-path=" in b or 'data-path="' in b
+    assert "is-edited" in b
+
+
 def test_extracted_fields_collapse_into_an_application_grouped_table():
     """§13 — Business / Beneficial owners / Control person."""
     b = body()

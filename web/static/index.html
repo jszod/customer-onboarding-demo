@@ -233,6 +233,17 @@ table.fields th, table.fields td {
 table.fields th { font-weight: 500; color: var(--muted); width: 240px; }
 table.fields td { font-weight: 520; }
 table.fields td.empty { color: var(--alert); font-weight: 500; }
+table.fields td.val { cursor: text; border-radius: 4px; }
+table.fields td.val:hover, table.fields td.val:focus {
+  background: var(--accent-bg, rgba(0,0,0,.04)); outline: none;
+}
+table.fields td.val.is-edited { color: var(--accent); font-weight: 640; }
+table.fields td.val.is-edited::after { content: " · edited"; font-size: 11px;
+  color: var(--muted); font-weight: 500; letter-spacing: .02em; }
+input.cell-edit {
+  width: 100%; font: inherit; padding: 2px 6px; border-radius: 5px;
+  border: 1px solid var(--accent); background: var(--surface); color: var(--ink);
+}
 
 .review-actions {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -520,6 +531,10 @@ function humanAge(iso) {
 /* --- local state -------------------------------------------------------- */
 let last = null;          // last status payload, or null when nothing runs
 let gapEdits = {};        // field_path -> analyst's typed value
+let corrections = {};     // field_path -> correction to an ALREADY-extracted field.
+                          // §9.1 chose an update over a signal because the analyst
+                          // edits field values; R-014 ruled field_edits is not
+                          // scoped to gaps, so the table below is editable too.
 let gapSig = "";          // rebuild the gap inputs only when the gaps change
 let appSig = "";          // ditto for the verified-fields table
 let reviewBusy = false;
@@ -657,12 +672,16 @@ function renderGaps(gaps) {
   }
 }
 
-function fieldRows(obj, keys) {
+function fieldRows(obj, keys, prefix) {
   return keys.map((k) => {
-    const v = fmtValue(obj ? obj[k] : null);
+    const path = (prefix || "") + k;
+    const edited = Object.prototype.hasOwnProperty.call(corrections, path);
+    const v = edited ? corrections[path] : fmtValue(obj ? obj[k] : null);
+    const cls = "val" + (edited ? " is-edited" : (v === null ? " empty" : ""));
+    const shown = v === null ? "not extracted" : v;
     return "<tr><th>" + esc(humanLeaf(k)) + "</th>" +
-      (v === null ? '<td class="empty">not extracted</td>' : "<td>" + esc(v) + "</td>") +
-      "</tr>";
+      '<td class="' + cls + '" data-path="' + esc(path) + '" tabindex="0" ' +
+      'title="Click to correct this value">' + esc(shown) + "</td></tr>";
   }).join("");
 }
 function renderVerified(app) {
@@ -676,7 +695,7 @@ function renderVerified(app) {
   let html = '<div class="grp"><h3>Business</h3><table class="fields">' +
     fieldRows(app, ["legal_name", "dba", "entity_type", "formation_date",
                     "formation_state", "tax_id", "industry_code",
-                    "registered_address", "business_address", "phone", "website"]) +
+                    "registered_address", "business_address", "phone", "website"], "") +
     "</table></div>";
   const owners = app.beneficial_owners || [];
   html += '<div class="grp"><h3>Beneficial owners</h3>';
@@ -685,16 +704,47 @@ function renderVerified(app) {
     html += '<h3 style="margin-top:12px">Owner ' + (i + 1) + "</h3>" +
       '<table class="fields">' +
       fieldRows(o, ["full_name", "dob", "ownership_pct", "residential_address",
-                    "id_type", "id_number"]) + "</table>";
+                    "id_type", "id_number"],
+                "beneficial_owners[" + i + "].") + "</table>";
   });
   html += "</div>";
   html += '<div class="grp"><h3>Control person</h3><table class="fields">' +
     fieldRows(app.control_person, ["full_name", "title", "dob",
                                    "residential_address", "id_type", "id_number",
-                                   "is_authorized_signatory"]) +
+                                   "is_authorized_signatory"], "control_person.") +
     "</table></div>";
   $("verified-body").innerHTML = html;
 }
+
+/* Click any value to correct it. The cell becomes an input; blur or Enter
+   commits into `corrections`, Escape abandons it. Delegated, so it survives
+   the table being re-rendered by a poll. */
+$("verified-body").addEventListener("click", (ev) => {
+  const cell = ev.target.closest("td.val");
+  if (!cell || cell.querySelector("input")) return;
+  if (!last || last.stage !== "awaiting_review") return;
+  const path = cell.dataset.path;
+  const before = Object.prototype.hasOwnProperty.call(corrections, path)
+    ? corrections[path]
+    : (cell.classList.contains("empty") ? "" : cell.textContent);
+  cell.innerHTML = '<input type="text" class="cell-edit" autocomplete="off">';
+  const input = cell.querySelector("input");
+  input.value = before;
+  input.focus();
+  input.select();
+  const commit = (keep) => {
+    const v = input.value.trim();
+    if (keep && v !== "") corrections[path] = v;
+    else if (keep) delete corrections[path];
+    appSig = "";                       /* force the table to redraw */
+    renderVerified((last && last.application) || null);
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") commit(true);
+    if (e.key === "Escape") commit(false);
+  });
+  input.addEventListener("blur", () => commit(true));
+});
 
 function syncApprove() {
   const gaps = (last && last.gaps) || [];
@@ -777,6 +827,13 @@ $("approve-btn").addEventListener("click", async () => {
   const field_edits = gaps.map((g) => ({
     field_path: g.field_path, value: (gapEdits[g.field_path] || "").trim(),
   }));
+  /* R-014: corrections to already-extracted fields travel in the same array.
+     A gap the analyst also corrected in the table is not sent twice. */
+  for (const path of Object.keys(corrections)) {
+    if (!field_edits.some((e) => e.field_path === path)) {
+      field_edits.push({ field_path: path, value: corrections[path] });
+    }
+  }
   await sendReview({
     decision: "approve", analyst_id: ANALYST_ID, note: null,
     field_edits: field_edits, attested: true,

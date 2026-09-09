@@ -31,6 +31,39 @@ with workflow.unsafe.imports_passed_through():
     SETTINGS = config.settings()
 
 
+def document_tool_turn(doc_ids: list[str], known_ids: set[str]) -> AgentTurn:
+    """The result of one `request_documents` call, as a tool turn.
+
+    Recorded on EVERY path, not only the error one. `call_llm` renders an
+    assistant turn as an assistant message, so a transcript ending on one is an
+    assistant prefill -- which Sonnet 5 and every 4.6+ model reject with a 400
+    (`This model does not support assistant message prefill`). Recording the
+    tool's result is both the correct tool-loop shape and what keeps the next
+    request valid.
+
+    Ids only. §8.2 keeps document text out of history, and `call_llm`
+    re-renders the granted documents into the user message from
+    `requested_doc_ids` regardless.
+
+    Pure and deterministic -- sorted, never set-ordered -- so it is safe in
+    workflow code, and `tools/record_fixtures.py` calls it too: that script
+    hand-rolls this loop to record fixtures without a Temporal server, and a
+    second copy of this rule is a second thing to forget.
+    """
+    granted = [d for d in doc_ids if d in known_ids]
+    unknown = [d for d in doc_ids if d not in known_ids]
+    parts = []
+    if granted:
+        parts.append(f"now readable: {', '.join(granted)}")
+    if unknown:
+        parts.append(f"unknown document ids: {', '.join(unknown)}. "
+                     f"Available: {', '.join(sorted(known_ids))}")
+    # An empty `doc_ids` would otherwise produce an empty content block, which
+    # the API also rejects.
+    return AgentTurn(role="tool",
+                     content="; ".join(parts) or "no document ids were requested")
+
+
 @workflow.defn(name="ExtractionAgentWorkflow")
 class ExtractionAgentWorkflow:
     @workflow.run
@@ -68,15 +101,10 @@ class ExtractionAgentWorkflow:
 
             # --- inline tool: request_documents (no I/O, pure state mutation)
             if isinstance(action, DocumentRequest):
-                unknown = [d for d in action.doc_ids if d not in known_ids]
                 for doc_id in action.doc_ids:
                     if doc_id in known_ids and doc_id not in requested:
                         requested.append(doc_id)
-                if unknown:
-                    turns.append(AgentTurn(
-                        role="tool",
-                        content=f"unknown document ids: {', '.join(unknown)}. "
-                                f"Available: {', '.join(sorted(known_ids))}"))
+                turns.append(document_tool_turn(action.doc_ids, known_ids))
                 continue
 
             # --- inline tool: submit_extraction (terminal)

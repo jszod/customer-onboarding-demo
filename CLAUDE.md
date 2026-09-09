@@ -6,31 +6,89 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–17 have landed. Task 18 is next.** Skeleton and config, models
-and `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
-documents, core banking, the gateway, the console, all four activities, the
-extraction child, and the parent's loop and happy path.
+**Plan Tasks 1–20 have landed. Task 21 is next — the last one.** Skeleton and
+config, models and `CONTRACT.md`, the 22-scenario manifest, the design
+artifact, sample documents, core banking, the gateway, the console, all four
+activities, the extraction child, the parent's loop and happy path, the
+recorded fixtures, and the committed histories with their replay gate.
 
-Suite: **163 passed, 4 skipped.** The 4 remaining skips are the T-REPLAY
-scenarios, which Task 20 owns — every other manifest scenario is live. That
-count is the progress bar, and `make verify` is correctly red until it reaches
-zero.
+Suite: **207 passed, 0 skipped — `make verify` says `VERIFY OK: 22/22`.** The
+manifest is complete, so the progress bar is spent: from here a skip is a
+regression, not remaining work.
 
-Task 18 is the progress tracker, and it also carries R-014's deferred half:
-making the console's extracted-fields table editable. See the ruling for the
-exact steps.
+**Two pieces of work remain, and only one of them is in the plan.**
 
-**Tasks 18–20 need a Temporal server** (`WorkflowEnvironment.start_local`). The
+1. **Task 21** — final verification and growing the README. The plan's last
+   task; it consumes everything and produces nothing new.
+2. **The console's visual design** — §13 fixes the functional surface and ends
+   with "Visual design is Stage 3 work". That pass has never been run. What
+   exists is 284 lines of CSS written in passing across Tasks 8, 11 and 18, and
+   there is **no visual spec anywhere** — no palette, type scale, spacing,
+   wireframe or responsive rule. This is a real hole, not an oversight: §13
+   says so out loud. It is not a plan task, so it needs either a §13.1 in the
+   spec or a new task before it is built (see the spec-first order below).
+
+Constraints any visual pass inherits: `tests/test_console.py` pins 20
+behaviours, including light/dark adaptation and **no external scripts or
+stylesheets** — no CDN fonts, no Tailwind. And those tests grep the page as
+text, so they pass against a page whose JavaScript throws; drive it in a real
+browser before believing it (`.claude/rules/testing.md`, R-022).
+
+**Changing the design means changing the spec first.** R-029 is the worked
+example: the root `Makefile` shape moved spec → plan → code, in that order,
+because a ruling cannot overrule the binding authority. Do the same for §13.1.
+
+**Task 20 was the first task to run the live stack, and it found three
+things.** `make up` had never started anything (R-025 — the guard matched its
+own recipe), fixture mode died on the second model call of every real run
+(R-026), and four defects in the plan's own Task 20 code (R-027). Read those
+three before touching `make/`, `fixture_call_llm`, or the capture tool.
+
+**Where the work lives.** Branch `claude/next-work-item-imsbdj`, pushed, six
+commits ahead of `main`, no PR opened. Working tree clean. Local prerequisites
+are the README's Setup: the Temporal CLI (`make demo` and `make histories`
+shell out to it), `uv`, and **no API key** — the fixtures are committed, so
+`make verify` runs on a fresh clone as-is.
+
+**`make/` changed shape after Task 20.** The root `Makefile` is now
+`include make/common.mk` rather than a rule forwarding nineteen target names to
+`python/`; every target is defined once, in `common.mk`, and `python/Makefile`
+is the same include from one directory down. The spec was amended first (§14,
+§15) — see R-029, and `.claude/rules/stack-and-make.md` for why not to
+reintroduce forwarding.
+
+**The replay gate is now the sharpest thing in the suite.** `histories/` holds
+nine captured histories and `tests/test_replay.py` replays every one. A red
+replay test is a claim about the *code* — re-capturing to make it green is how
+the gate stops guarding. Both gates have been watched failing: the grep guard
+on an inserted `random()`, and the replayer on an extra timer it cannot see.
+
+`fixtures/acme-corp.json` is recorded and committed, so the suite is keyless.
+Two iterations: `request_documents`, then `submit_extraction` reporting
+`beneficial_owners[1].dob` — §8.4's deliberate gap, which is the escalation
+beat. Re-record (`make fixtures`, needs a key in `.env`) only if the prompt,
+`ApplicationFields`, or the document set changes.
+
+**Read R-024 before touching the agent loop or `prompts.TOOLS`.** The first
+live run failed twice on defects that were merged and green: the transcript
+ended on an assistant turn (a permanent 400 — prefill is gone on every 4.6+
+model), and the terminal tools declared `{"type": "object"}` for their
+payloads, which retries forever rather than failing. Both rules are now
+promoted into `.claude/rules/`.
+
+**The suite needs a Temporal server** (`WorkflowEnvironment.start_local`). The
 SDK downloads its own server binaries from `temporal.download` at runtime — the
 only download host compiled into the Rust bridge — so that host must be
 reachable, or the work must run somewhere it already is. The Temporal CLI is a
-separate prerequisite for `make demo`; see the README's Setup section.
+separate prerequisite for `make demo` and `make histories`; see the README's
+Setup section. Same host, so a container that can run the suite can be given
+the CLI too.
 
 | Document | What it is |
 |----------|------------|
 | `docs/superpowers/specs/2026-09-04-customer-onboarding-design.md` | **The binding authority.** 22 sections. Settles everything. |
 | `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 21 tasks, 127 steps. How the spec gets built. |
-| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. R-014 settled the last open question and left one named piece of console work for Task 18. |
+| `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. R-014's deferred console work landed in Task 18 as R-022; no open questions remain. **R-021–R-023 were renumbered from R-017–R-019 when the Task 18 branch merged `main`** — two branches wrote those three numbers in parallel, and the commit messages still use the old ones. |
 | `docs/demo-brief.md` | 11 numbered decisions with the reasoning and the **rejected** alternatives. |
 | `docs/DEVELOPMENT-PROCESS.md` | The four-stage process this repo follows. |
 
