@@ -1639,3 +1639,40 @@ they also pass against a page that never reached the state under test, and that
 a check which `continue`s past a missing selector is not a check. Both clauses
 live beside R-022's, because the next person to write a Playwright audit will
 reach for `file://` and for `if not el: continue` in the same sitting.
+
+## R-033 — the responsive block lost the cascade, and only a browser saw it
+
+**Task 22, Step 11 and Step 14.** The plan said "delete the 860px query and
+fold `.cols` into the 900px query". Followed literally, that put
+`.cols { grid-template-columns: 1fr }` inside a media block at line 192, while
+the unconditional `.cols { grid-template-columns: 1.55fr 1fr }` sat at line
+307. Identical specificity — `@media` contributes none — so the later rule won
+and **the columns never collapsed**. At 820px the console still rendered Case
+Actions and Demo Controls side by side.
+
+**Every grep-level test passed.** `test_there_is_exactly_one_breakpoint` saw
+exactly one breakpoint. The declaration was present, the value was right, the
+selector was right. Nothing in a text search can distinguish a rule that
+applies from a rule that is overridden three hundred lines later, because the
+difference is not in the text — it is in the order.
+
+Step 14's browser drive caught it: measured `.cols` at 452px + 291px on a
+820px viewport, where it should have been one column. Fixed by moving the whole
+responsive block to the end of the stylesheet, after every rule it overrides,
+and verified at the boundary — 901px gives two columns, 900px gives one.
+
+**Promoted, and it meets the rule of two on its own terms.** This is the third
+green gate that could not see what it was guarding: R-022 (tests pass against a
+page whose JavaScript throws), R-032 (tests pass against a page that never
+reached the state under test), and now a test that passes against a rule which
+never applies. The pattern is not "write more greps" — it is that a grep
+asserts the presence of text and CSS behaviour is decided by cascade, media
+state and DOM state, none of which are text.
+
+The plan's Step 11 is corrected to say *where* the block goes and why. An
+eleventh test pins source order — `.cols {` and `.stepper {` must both appear
+before `@media (max-width: 900px)` — and it was proven by planting the
+regression and watching it fail, because a guard nobody has seen fail is a
+guess. That takes the console suite to 31 and the whole suite to 218; the
+§16.8 manifest is untouched at 22, since these are ordinary tests and not
+scenarios.

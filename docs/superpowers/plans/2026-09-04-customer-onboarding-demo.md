@@ -5220,13 +5220,13 @@ disagree. §13.1 ratifies the palette and fixes everything else.
 **This task adds no manifest scenarios.** The §16.8 manifest is complete at 22
 and `make verify` prints that count as a literal string. Do **not** invent
 `T-CONSOLE-*` IDs — these are ordinary tests. `tests/test_console.py` grows
-from 20 behaviours to 30.
+from 20 behaviours to 31.
 
 **Files:**
 - Modify: `web/static/index.html` — the `<style>` block only (284 of 947 lines).
   No markup or JavaScript changes; the existing 20 tests must keep passing
   untouched.
-- Test: `tests/test_console.py` — append ten tests
+- Test: `tests/test_console.py` — append eleven tests
 - Modify: `.claude/rules/testing.md` — correct the browser path (see Step 14)
 
 **Interfaces:**
@@ -5454,12 +5454,30 @@ def test_every_strong_fill_carries_its_ink_token():
     token *declaration* may hold a literal."""
     literals = re.findall(r"(?<!-)\bcolor:\s*(#[0-9a-fA-F]{3,8})", css())
     assert literals == [], f"hardcoded foreground colours: {literals}"
+
+
+def test_the_responsive_block_comes_after_the_rules_it_overrides():
+    """§13.1.4 — `@media` contributes nothing to specificity, so a 900px block
+    written above the unconditional `.cols` rule loses the cascade to it and
+    the columns never collapse. Every other test in this file still reports
+    green when that happens: the breakpoint is present, the declaration is
+    present, only the order is wrong. Source order is the whole mechanism, so
+    source order is what this pins."""
+    c = css()
+    media = c.index("@media (max-width: 900px)")
+    late = [s for s in (".cols {", ".stepper {") if c.index(s) > media]
+    assert not late, f"declared after the 900px block, so it overrides it: {late}"
 ```
+
+The last one is R-033's guard and it was added *after* Step 11 shipped the bug
+it describes. Prove it by planting the regression — move the media block back
+above `.cols` and watch it fail — because a guard nobody has seen fail is a
+guess.
 
 - [ ] **Step 3: Run the new tests to verify they fail**
 
 Run: `uv run pytest tests/test_console.py -v`
-Expected: the 20 existing tests PASS; all 10 new tests FAIL.
+Expected: the 20 existing tests PASS; all 11 new tests FAIL.
 `test_the_type_scale_is_six_sizes` should report the off-scale set
 `['11.5px', '12px', '12.5px', '13.5px', '14.5px', '15.5px', '16px', '19px']` —
 note the **16px**, which is the base hiding in `body`'s `font:` shorthand and
@@ -5668,7 +5686,18 @@ Expected: PASS. If it fails, the message names each offender.
 - [ ] **Step 11: One breakpoint, and make the stepper scroll**
 
 Delete `@media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }`
-and fold `.cols` into the 900px query. Replace the stepper's column collapse:
+and fold `.cols` into the 900px query.
+
+**Put the whole responsive block at the END of the stylesheet** — after
+`.cols`, after `.stepper`, after everything it overrides. `@media` contributes
+nothing to specificity, so a 900px block written where the old stepper query
+sat (~line 187, 115 lines above `.cols`) loses the cascade to the unconditional
+`.cols` rule and **the columns never collapse**. Every grep-level test in Step 2
+still passes: the breakpoint is there, the selector is right, the value is
+right, and only the order is wrong. This actually happened — R-033. Step 14's
+browser drive is what caught it, measuring 452px + 291px on an 820px viewport.
+
+Replace the stepper's column collapse:
 
 ```css
 .stepper {
@@ -5728,15 +5757,15 @@ pill:
 - [ ] **Step 13: Run the whole suite**
 
 Run: `uv run pytest tests/test_console.py -v`
-Expected: 30 passed. The 20 original tests must be untouched — if any of them
+Expected: 31 passed. The 20 original tests must be untouched — if any of them
 changed, markup or JavaScript was edited and this task's scope was exceeded.
 
 Run: `make verify`
-Expected: `VERIFY OK: 22/22 scenarios implemented and passing`, 217 passed, 0 skipped.
+Expected: `VERIFY OK: 22/22 scenarios implemented and passing`, 218 passed, 0 skipped.
 
 - [ ] **Step 14: Drive it in a real browser — R-022**
 
-All 30 tests above read the page as text. They pass against a page whose
+All 31 tests above read the page as text. They pass against a page whose
 JavaScript throws and against a page that renders as unstyled HTML.
 
 **`.claude/rules/testing.md` points at `/opt/pw-browsers/`, which is a
@@ -5935,7 +5964,7 @@ shows. Corrected testing.md's browser path: /opt/pw-browsers/ is a
 container path and is absent on macOS, so the rule sent local readers
 nowhere.
 
-Suite 217 passed, 0 skipped. Manifest untouched at 22/22 -- these are
+Suite 218 passed, 0 skipped. Manifest untouched at 22/22 -- these are
 ordinary tests, not new scenarios."
 ```
 
