@@ -1,6 +1,4 @@
-.DEFAULT_GOAL := up
-up down status logs demo demo-reset worker kill-worker restart-worker \
-gateway core-banking temporal test verify fixtures histories documents clean deps:
-	@$(MAKE) --no-print-directory -C python $@
-.PHONY: up down status logs demo demo-reset worker kill-worker restart-worker \
-        gateway core-banking temporal test verify fixtures histories documents clean deps
+# Every target lives in make/common.mk and is defined exactly once (§14, §15).
+# This file, and python/Makefile, are entry points into it -- not copies of the
+# target list. A second SDK's makefile would be this same line again.
+include make/common.mk

@@ -46,9 +46,9 @@ Which files exist and what each is responsible for. Locked in here so tasks don'
 | Path | Responsibility |
 |------|----------------|
 | `pyproject.toml` | deps, pytest config, `uv` project root |
-| `Makefile` | forwards every target to `python/Makefile` |
-| `make/common.mk` | process management: pgrep guards, nohup, pkill, URL printing |
-| `python/Makefile` | the SDK's targets |
+| `Makefile` | one line: `include make/common.mk` |
+| `make/common.mk` | every target, defined once: process management, pgrep guards, nohup, pkill, URL printing |
+| `python/Makefile` | the same include, from `python/` — a second entry point, not a second definition |
 | `CLAUDE.md` | run/test commands, task queue, IDs, determinism rule, layout |
 | `CONTRACT.md` | the §6 wire surface, SDK-agnostic, string names only |
 | `TALK_TRACK.md` | narration for a live or design-only walkthrough |
@@ -289,17 +289,23 @@ Expected: PASS — 4 passed
 
 ```makefile
 # Makefile (repo root)
-.DEFAULT_GOAL := up
-up down status logs demo demo-reset worker kill-worker restart-worker \
-gateway core-banking temporal test verify fixtures histories documents clean deps:
-	@$(MAKE) --no-print-directory -C python $@
-.PHONY: up down status logs demo demo-reset worker kill-worker restart-worker \
-        gateway core-banking temporal test verify fixtures histories documents clean deps
+include make/common.mk
 ```
+
+§14: one definition, two entry points. `common.mk` carries `.DEFAULT_GOAL` and
+every target; the root file and `python/Makefile` each just include it. Do not
+reintroduce a forwarding rule that lists the targets again at the root — the
+list would have to be edited twice, and a target missing from the second copy
+fails as "No rule to make target" rather than as anything diagnostic.
 
 ```makefile
 # make/common.mk
+# `$(lastword $(MAKEFILE_LIST))` is this file as the includer spelled it --
+# `make/common.mk` from the root, `../make/common.mk` from python/ -- so ROOT
+# is the repo root either way, and every recipe below uses it rather than the
+# working directory.
 ROOT := $(shell cd $(dir $(lastword $(MAKEFILE_LIST)))/.. && pwd)
+.DEFAULT_GOAL := up
 .PHONY: up down status logs demo demo-reset temporal gateway core-banking \
         worker kill-worker restart-worker test verify fixtures histories documents clean deps
 

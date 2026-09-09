@@ -1,4 +1,17 @@
+# Every target is defined HERE, once (§14, §15). The root `Makefile` and
+# `python/Makefile` are one-line includes of this file, and a second SDK's
+# makefile would be a third. Nothing forwards, so no target list is written
+# twice and none can go missing from a copy.
+#
+# `$(lastword $(MAKEFILE_LIST))` is this file as the includer spelled it --
+# `make/common.mk` from the root, `../make/common.mk` from python/ -- so ROOT
+# is the repo root from either entry point. Every recipe below uses it rather
+# than the working directory, which is what makes that true.
 ROOT := $(shell cd $(dir $(lastword $(MAKEFILE_LIST)))/.. && pwd)
+
+# An include has no first target of its own to become the default, and the
+# first one here is `deps`. Say it instead of inheriting it.
+.DEFAULT_GOAL := up
 
 # Local configuration: `cp .env.example .env`, then edit. Optional -- the
 # leading `-` means a missing file is not an error, so a fresh clone still

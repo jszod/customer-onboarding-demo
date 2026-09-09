@@ -1407,6 +1407,11 @@ do not assume the transition. Defect 4 is a convention the file states itself.
 
 ## R-028 — 23 setup errors that were the demo stack, not the suite
 
+> **Superseded in part by R-030.** The reading below — that the demo stack
+> caused it — did not survive the next occurrence, which happened with the
+> stack down. The symptom and its shape (one fixture, 23 errors) still
+> hold; the cause and the remedy are in R-030.
+
 **Task 20, verification.** `make verify` came back with `184 passed, 23
 errors`, every error at fixture *setup*:
 
@@ -1427,3 +1432,97 @@ suite cannot do anything about it because the contention is outside it.
 `.claude/rules/stack-and-make.md` alongside R-025, because the failure looks
 like a broken fixture and is not one — and an agent that reads it as a fixture
 bug will "fix" a fixture that was right.
+
+## R-029 — the root Makefile includes rather than forwards; the spec changed
+
+**Task 20, in review.** Reading the Makefile, the reviewer could not find `up`,
+`down`, `worker` or `kill-worker` in it — correctly, because the root file held
+no recipes at all:
+
+```make
+up down status logs demo demo-reset worker kill-worker restart-worker \
+gateway core-banking temporal test verify fixtures histories documents clean deps:
+	@$(MAKE) --no-print-directory -C python $@
+```
+
+One rule with nineteen target names, forwarding each to `python/`, which
+included `make/common.mk`, which held the actual recipes. Two hops from a
+target's name to what it does, and the name written three times — the rule, the
+`.PHONY` line, and `common.mk`.
+
+**The change.** The root `Makefile` is now `include make/common.mk`;
+`python/Makefile` stays `include ../make/common.mk`. `common.mk` gained
+`.DEFAULT_GOAL := up`, which the forwarder used to carry, and which an include
+does not supply on its own — the first target here is `deps`. Nothing forwards,
+so no target list exists twice.
+
+`ROOT` already made this work: it resolves through the included file's own path
+in `MAKEFILE_LIST`, so it is the repo root from either entry point, and every
+recipe uses `$(ROOT)` rather than the working directory. Verified from both:
+same default goal, same absolute paths, and a full `up` / `status` /
+`demo-reset` / `down` cycle from the root.
+
+**Authority — and this one is different from every other ruling here.** The
+rest of this log records decisions taken *within* the spec. This one changes
+it: §15's layout line read "`Makefile` — forwards to python/", and a ruling
+cannot overrule the binding authority. So the spec was amended first (§14 gains
+the one-definition-two-entry-points paragraph and the rejected alternative, §15
+the new layout line), then the plan's file table and Task 1 Step 6, then the
+code. The decision was the repository owner's, made in review; the ordering is
+`DEVELOPMENT-PROCESS.md`'s.
+
+**What the old shape bought, and why it was still worth losing.** Forwarding
+made the root file a table of contents: every target visible in one screen. The
+multi-SDK story it was for is served better by the include — a `go/Makefile`
+is the same one line, and the root does not have to choose which SDK to forward
+to. The cost of the old shape was silent: a target added to `common.mk` and not
+to the root's list is simply absent, and reports as `No rule to make target`.
+
+**Promoted** to `.claude/rules/stack-and-make.md`, first occurrence, on the
+"it will bite a task you can name" clause: Task 21 edits the README's command
+list, and re-adding a forwarding rule is exactly the tidy-looking change
+someone makes when they want the target names visible at the root again.
+
+## R-030 — R-028's cause was wrong: the dev server start is just flaky
+
+**Task 20, review follow-up.** R-028 blamed the demo stack for 23 setup errors
+and prescribed `make down` first. The next `make verify` produced the identical
+23 errors **with the stack down**, seconds after it had been stopped. The
+explanation was wrong, so it is withdrawn here rather than left to be believed.
+
+**What was actually measured, on one machine on one day:**
+
+| Observation | Result |
+|---|---|
+| Full suite runs | 6; 2 failed this way, 4 green — same command each time |
+| Failures with the demo stack up / down | one each |
+| `start_local` standalone, back to back | 5 of 5, **0.21s** each — the 5s budget is 20× generous |
+| Consecutive suite runs after the second failure | 3, all `207 passed`, nothing changed |
+| Server binary re-downloaded? | No — cached at `/tmp/temporal-sdk-python-1.32.0` |
+
+So: intermittent, environmental, in the spawning of the ephemeral server, and
+unrelated to anything the suite or the stack does. It is R-019's message for a
+*third* distinct reason, which is worth naming — that message means "a dev
+server did not come up in five seconds" and nothing more specific, and each
+time it has been tempting to read it as a broken fixture.
+
+**The ruling.** Retry the start once, in the `env` fixture. There is no
+configuration fix: the five seconds are compiled into the Rust bridge and
+`WorkflowEnvironment.start_local` exposes no timeout parameter (checked against
+the installed SDK's signature). The retry is narrow — it matches only
+`Failed starting Temporal dev server` and re-raises anything else, so a genuine
+fault still fails on its own traceback rather than a confusing second one.
+
+**Why the fixture and not the caller.** Session scope is what makes this worth
+fixing rather than tolerating: one failed start errors all 23 dependent tests
+at setup, so the blast radius of a hiccup is the entire workflow half of the
+suite, and the failure reads as 23 broken tests to whoever finds it. Same
+reasoning as R-019, which made this fixture session-scoped in the first place.
+
+**The lesson, which is the part worth keeping.** R-028 was written from two
+data points that happened to agree with a plausible story, and the story was
+checked only against the run that suggested it. One contrary run and five
+minutes of measurement was all it took to disprove. **Before promoting a
+diagnosis into `.claude/rules/`, reproduce it deliberately — a rule is read as
+settled fact by everyone who comes after, and a wrong one sends them to fix
+something that was never broken.**

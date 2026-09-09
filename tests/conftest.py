@@ -139,10 +139,32 @@ async def env():
     uuid4, so two tests cannot see each other's workflows even on one server.
     Adding a test that pins a fixed workflow id or task queue would break that,
     and it is the thing to check before doing so.
+
+    **Started with one retry.** Spawning the ephemeral server occasionally does
+    not answer inside the bridge's five-second connect budget -- twice in six
+    runs of the full suite on the day this was written, on a machine where
+    starting one standalone took 0.21s five times out of five. The budget is
+    compiled into the Rust bridge and `start_local` exposes no knob for it, so
+    the retry is the only lever. It matters more here than it would elsewhere:
+    this fixture is session-scoped, so its single failure errors every one of
+    the 23 tests that depend on it and reads like 23 broken tests (R-030).
     """
-    async with await WorkflowEnvironment.start_local(
-            data_converter=config.build_data_converter()) as e:
+    async with await _start_local_with_one_retry() as e:
         yield e
+
+
+async def _start_local_with_one_retry() -> WorkflowEnvironment:
+    try:
+        return await WorkflowEnvironment.start_local(
+            data_converter=config.build_data_converter())
+    except RuntimeError as first:
+        # Only the startup failure. Anything else is a real fault and must not
+        # be retried into a confusing second traceback.
+        if "Failed starting Temporal dev server" not in str(first):
+            raise
+        print(f"\ndev server did not start ({first}); retrying once")
+        return await WorkflowEnvironment.start_local(
+            data_converter=config.build_data_converter())
 
 
 async def run_worker(env, stubs: Stubs):

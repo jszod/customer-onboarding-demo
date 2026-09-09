@@ -10,6 +10,24 @@ paths:
 Spec §14. These targets are the demo's entry point: `make demo` is the first
 thing that runs on stage and the last thing anybody debugs there.
 
+## One definition, many entry points
+
+Every target lives in `make/common.mk`. The root `Makefile` and
+`python/Makefile` are one-line includes of it, and a second SDK's makefile
+would be a third. **Do not add a forwarding rule** — a root rule that lists the
+targets and re-invokes `$(MAKE) -C python $@` writes the list a second time (a
+third, with `.PHONY`), and a target added to `common.mk` but missed in the copy
+is then absent with nothing but `No rule to make target` to say so. That shape
+was the original one and the spec now rejects it explicitly (R-029).
+
+Two consequences worth knowing:
+
+- **Recipes must not depend on the working directory.** `make` may be invoked
+  from the repo root or from `python/`. Use `$(ROOT)`, which resolves through
+  this file's own entry in `MAKEFILE_LIST` and is absolute from either.
+- **`.DEFAULT_GOAL := up` lives in `common.mk`.** An include contributes no
+  first target to inherit as the default, and the first target here is `deps`.
+
 ## A `pgrep` guard must not share a command line with the command it guards
 
 `pgrep -f` matches **whole command lines**, and a recipe is a command line. A
@@ -53,20 +71,27 @@ bracketed patterns — and the log says which mode the worker came up in
 (`call_llm implementation: fixture_call_llm`), which is the other thing that
 silently changes what a run means.
 
-## `make down` before `make verify`
-
-The suite starts its own dev server (`WorkflowEnvironment.start_local`, one per
-run) and gives it five seconds to answer. A demo stack running alongside it —
-server, worker, gateway, core banking — is enough to lose that race on a busy
-machine: 23 tests erroring at *setup* with
+## 23 tests erroring at setup is one fixture, and it is the machine
 
     Failed starting Temporal dev server: Failed connecting to test server
     after 5 seconds … ConnectionRefused
 
-which is the same symptom R-019 chased, from a different cause. Nothing was
-wrong with the tests; the same command passed with the stack down. So take the
-stack down before running the suite, and read a setup-time connection error as
-contention rather than as a broken fixture.
+The suite starts its own dev server (`WorkflowEnvironment.start_local`) and the
+bridge gives it five seconds to answer. When that fails, the session-scoped
+`env` fixture fails once and all 23 tests that depend on it error at *setup* —
+one environmental hiccup wearing the costume of 23 broken tests.
+
+It is intermittent and it is not the demo stack: it happened both with the
+stack up and with it down, and three consecutive clean runs followed with
+nothing changed (R-030 has the measurements). `conftest.py` retries the start
+once, which is the only lever — the budget is compiled into the Rust bridge and
+`start_local` takes no timeout argument.
+
+So if you see it: it is not a broken fixture and there is nothing to fix in the
+test. Run it again. If it survives the retry *and* a re-run, look at the
+machine — load, file descriptors, a port range in use — not at the suite.
+Taking the demo stack down first is still good hygiene (it is four processes
+competing for the same machine), but it is not the cause and it is not a fix.
 
 ## `make up` runs keyless only if you tell it to
 
