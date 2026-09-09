@@ -136,10 +136,12 @@ h2 {
   --accent-ink:  #ffffff;
   --accent-wash: #eaeffb;
   --done:       #16755a;
+  --done-ink:   #ffffff;
   --done-wash:  #e6f3ee;
-  --wait:       #a1620a;
+  --wait:       #985c09;
   --wait-wash:  #fbf1e0;
   --alert:      #ab2020;
+  --alert-ink:  #ffffff;
   --alert-wash: #fbebe9;
   --control-bg:    #ffffff;
   --control-hover: #f4f2ee;
@@ -158,10 +160,12 @@ h2 {
   --accent-ink:  #0e1014;
   --accent-wash: #1b2436;
   --done:       #4ac79b;
+  --done-ink:   #0e1014;
   --done-wash:  #142b25;
   --wait:       #e8ad4a;
   --wait-wash:  #2c2415;
   --alert:      #ff7b72;
+  --alert-ink:  #0e1014;
   --alert-wash: #2e1a1a;
   --control-bg:    #0f1318;
   --control-hover: #18202a;
@@ -338,7 +342,7 @@ h2 {
 }
 .console .btn:hover { background: var(--control-hover); border-color: var(--text-1); }
 .console .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.console .btn.go { background: var(--done); border-color: var(--done); color: #fff; }
+.console .btn.go { background: var(--done); border-color: var(--done); color: var(--done-ink); }
 .console .btn.quiet { background: transparent; }
 .console .btn:disabled { opacity: .45; cursor: not-allowed; }
 
@@ -789,7 +793,7 @@ a:focus-visible, summary:focus-visible {
         <div class="swatches">
           <div class="sw"><div class="chipbar"><i style="background:#2a4b9b"></i><i style="background:#7fa3ff"></i></div><div class="lbl">--accent</div></div>
           <div class="sw"><div class="chipbar"><i style="background:#16755a"></i><i style="background:#4ac79b"></i></div><div class="lbl">--done</div></div>
-          <div class="sw"><div class="chipbar"><i style="background:#a1620a"></i><i style="background:#e8ad4a"></i></div><div class="lbl">--wait</div></div>
+          <div class="sw"><div class="chipbar"><i style="background:#985c09"></i><i style="background:#e8ad4a"></i></div><div class="lbl">--wait</div></div>
           <div class="sw"><div class="chipbar"><i style="background:#ab2020"></i><i style="background:#ff7b72"></i></div><div class="lbl">--alert</div></div>
         </div>
         <p class="sec-note" style="margin-top:16px;font-size:13.5px">

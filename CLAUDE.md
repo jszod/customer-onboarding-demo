@@ -6,7 +6,8 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–20 have landed. Task 21 is next — the last one.** Skeleton and
+**Plan Tasks 1–20 have landed. Task 22 is next, then Task 21 closes it out.**
+The number is a label, not a position — see the doc table below. Skeleton and
 config, models and `CONTRACT.md`, the 22-scenario manifest, the design
 artifact, sample documents, core banking, the gateway, the console, all four
 activities, the extraction child, the parent's loop and happy path, the
@@ -18,14 +19,16 @@ regression, not remaining work.
 
 **Two pieces of work remain, and only one of them is in the plan.**
 
-1. **Task 21** — final verification and growing the README. The plan's last
-   task; it consumes everything and produces nothing new.
-2. **Task 22** — the console's visual system. §13.1 is written and **Task 22 is
-   written**; the code has not caught up. `web/static/index.html` still carries
-   the thirteen font sizes and eight weights it accumulated across Tasks 8, 11
-   and 18. Task 22's Step 1 is a mockup that must be approved before any CSS
-   moves, because §13.1 was derived from reading the stylesheet rather than
-   looking at the page. **Task 22 runs before Task 21.**
+1. **Task 22** — the console's visual system, and it runs **first**. §13.1 is
+   written, Task 22 is written, and the approved mockup is shot into
+   `docs/design/` — the code is what has not caught up.
+   `web/static/index.html` still carries the thirteen font sizes and eight
+   weights it accumulated across Tasks 8, 11 and 18. Step 1 is to re-read the
+   mockup, not to build one.
+2. **Task 21** — final verification and growing the README. The plan's last
+   task; it consumes everything and produces nothing new. It runs **after**
+   Task 22, because it walks the console by hand and writes the README against
+   what it sees.
 
 Constraints any visual pass inherits: `tests/test_console.py` pins 20
 behaviours, including light/dark adaptation and **no external scripts or

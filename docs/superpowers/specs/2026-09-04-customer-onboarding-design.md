@@ -880,7 +880,8 @@ live on a laptop in a customer call:
 #### 13.1.1 Tokens
 
 Naming follows `temporal-agent-harness/ui/src/app.css` — numbered surface and
-text ramps rather than ad-hoc names. **Values are ours and unchanged.**
+text ramps rather than ad-hoc names. **Values are ours and unchanged, with the
+two exceptions §13.1.5 forces** — both marked in the table.
 
 | Token | Light | Dark | Use |
 |-------|-------|------|-----|
@@ -892,11 +893,32 @@ text ramps rather than ad-hoc names. **Values are ours and unchanged.**
 | `--border` | `#e3e0d8` | `#272c36` | Default hairline |
 | `--border-strong` | `#cfcbc0` | `#38404e` | Control outlines, chips |
 | `--accent` / `--accent-ink` / `--accent-wash` | `#2a4b9b` / `#ffffff` / `#eaeffb` | `#7fa3ff` / `#0e1014` / `#1b2436` | In-progress, primary action, focus |
-| `--done` / `--done-wash` | `#16755a` / `#e6f3ee` | `#4ac79b` / `#142b25` | Completed step, verified field |
-| `--wait` / `--wait-wash` | `#a1620a` / `#fbf1e0` | `#e8ad4a` / `#2c2415` | Durable wait — the **normal** state |
-| `--alert` / `--alert-wash` | `#ab2020` / `#fbebe9` | `#ff7b72` / `#2e1a1a` | Gap, failure, terminal rejection |
+| `--done` / `--done-ink` / `--done-wash` | `#16755a` / `#ffffff` / `#e6f3ee` | `#4ac79b` / `#0e1014` / `#142b25` | Completed step, verified field |
+| `--wait` / `--wait-wash` | **`#985c09`** / `#fbf1e0` | `#e8ad4a` / `#2c2415` | Durable wait — the **normal** state |
+| `--alert` / `--alert-ink` / `--alert-wash` | `#ab2020` / `#ffffff` / `#fbebe9` | `#ff7b72` / `#0e1014` / `#2e1a1a` | Gap, failure, terminal rejection |
 | `--focus-ring` | `--accent` @ 40% | `--accent` @ 45% | `:focus-visible` outline |
-| `--control-bg` / `--control-hover` | `#ffffff` / `#f4f2ee` | `#0f1318` / `#18202a` | Buttons, inputs |
+| `--control-bg` / `--control-hover` | `#ffffff` / `#f4f2ee` | `#0f1318` / `#18202a` | Button and input fills — `.btn`, `input.cell-edit` |
+
+**Every strong fill carries an ink token.** `--accent-ink` already existed;
+`--done-ink` and `--alert-ink` are new, and they are not cosmetic. The
+stylesheet Tasks 8/11/18 produced sets `color: #fff` literally on `.btn.go`
+(over `--done`) and on `.stepper li.is-failed .step-n` (over `--alert`). Those
+two hardcodes are fine in light and **fail badly in dark** — white on `#4ac79b`
+is 2.11:1 and white on `#ff7b72` is 2.52:1, against §13.1.5's 4.5:1 floor. With
+the ink tokens they read 9.01:1 and 7.55:1. `--wait` needs no ink token: it is
+never used as a fill, only as text on `--wait-wash`.
+
+**`--wait` is the one value that changed.** `#a1620a` on `--wait-wash` measures
+4.40:1 — under the floor, on the pill that carries the *normal* state and that
+the demo sits on for the whole KYC beat. `#985c09` is the smallest darkening
+that clears it: 4.85:1 on `--wait-wash`, 5.43:1 on `--surface-1`, 4.85:1 on
+`--surface-0`. Hue and chroma are unchanged; nothing else in the palette moves.
+
+**`--surface-2` versus `--control-bg`.** Both look like "input background", and
+the split is deliberate: `--surface-2` is a *recess* in a panel (the gap input,
+the chip, `.review-actions`), `--control-bg` is a *raised control* (`.btn`,
+`input.cell-edit`). They are the same value in light and deliberately different
+in dark, where a raised control sits darker than the panel behind it.
 
 Both themes are **opaque**. `temporal-agent-harness` builds borders from
 `rgba(255,255,255,.08)`, which is correct over a fixed dark ground and
@@ -916,9 +938,9 @@ moment the demo is claiming the opposite.
 
 #### 13.1.2 Type scale
 
-Six sizes. The thirteen that Tasks 8–18 produced (11, 11.5, 12, 12.5, 13,
-13.5, 14, 14.5, 15, 15.5, 17, 19, 21px) collapse as follows — the half-pixel
-steps were never distinguishable at projector distance.
+Six sizes. The thirteen `font-size` declarations Tasks 8–18 produced (11, 11.5,
+12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5, 17, 19, 21px) collapse as follows — the
+half-pixel steps were never distinguishable at projector distance.
 
 | Token | Size | Replaces | Use |
 |-------|------|----------|-----|
@@ -928,6 +950,15 @@ steps were never distinguishable at projector distance.
 | `--fs-body` | 15px | 14.5, 15, 15.5 | Controls, buttons, body copy, inputs |
 | `--fs-title` | 17px | 17 | Panel headings, `.fact-v` |
 | `--fs-display` | 21px | 19, 21 | Client name, current-stage title |
+
+**A fourteenth size hides in a shorthand.** `body` declares
+`font: 16px/1.5 …`, which no `font-size:` census sees, so the document base is
+16px and not on the scale. It becomes `--fs-body` (15px). Anything without an
+explicit size therefore shrinks by 1px — in practice the `.action .txt` copy
+and any unstyled text node; every heading and label is explicitly sized and is
+unaffected. This is a real rendering change, listed with the other two in Task
+22's Step 1, and it is why the type-scale test must also reject a size hidden
+in a `font:` shorthand rather than only auditing `font-size:`.
 
 **Weights: 500, 600, 700.** Replacing eight (500, 520, 560, 600, 620, 640,
 680, 700). The `ui-sans-serif` stack resolves to a non-variable system face on
@@ -944,9 +975,15 @@ self-hosting a webfont to gain two character variants fails the cost test, and
 
 #### 13.1.3 Spacing and radius
 
-**4px base unit**, tokens `--sp-1` (4px) through `--sp-8` (32px). The ad-hoc
-3, 5, 6, 7, 9, 11, 13, 18, 22 and 26px values all round into it. `--radius`
-stays 10px for panels; `--radius-sm` is 8px for controls, chips and steps.
+**4px base unit**, tokens `--sp-1` (4px) through `--sp-8` (32px). The sixteen
+ad-hoc padding/margin/gap values — 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 17,
+18, 22, 26 and 34px — all round into it: nearest multiple of 4, rounding **up**
+on an exact tie. `--radius` stays 10px for panels; `--radius-sm` is 8px for
+controls, chips and steps.
+
+`width`, `height`, `inset` and `top` are component dimensions, not spacing, and
+stay off the grid — the 34px brand mark, the 21px step numeral and the 17px
+checkboxes are sizes.
 
 #### 13.1.4 Layout and responsive rules
 
@@ -971,8 +1008,15 @@ of a gesture; wrapping preserves the gesture at the cost of the meaning.
   buttons, links, checkboxes, text inputs and the editable table cells.
   Currently only `.gap input[type=text]` has any focus treatment, which makes
   the review gate unusable by keyboard.
-- **4.5:1 minimum text contrast** in both themes, including text on the
-  `-wash` fills.
+- **4.5:1 minimum text contrast** in both themes — including text on the
+  `-wash` fills *and* on the strong `--done` / `--alert` / `--accent` fills.
+  Three pairs failed when this section was first written, all three because the
+  values were ratified from the stylesheet without being measured: `--wait` on
+  `--wait-wash` at 4.40:1, and the two literal `#fff` fills at 2.11:1 and
+  2.52:1 in dark. §13.1.1 fixes all three. **A colour is not ratified until it
+  has been measured** — the audit belongs in Task 22's browser drive, not in a
+  grep test, because only the browser knows what actually sits behind an
+  element.
 - **`prefers-reduced-motion: reduce`** disables all animation, not only the
   stage pill's pulse. Already correct for `.pill::before`; the rule generalises.
 - **`color-scheme`** stays declared on `:root` in both themes so form controls
