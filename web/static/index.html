@@ -444,7 +444,14 @@ table.fields td.val:focus-visible {
       <div class="card-head"><span class="eyebrow">Demo controls</span></div>
       <div class="card-body">
         <label class="toggle">
-          <input type="checkbox" id="slow-first-call">
+          <!-- Checked, because core banking arms it at startup
+               (core_banking/app.py: app.state.slow_first_call = True) and
+               nothing syncs this box from the server. An unchecked box over an
+               armed flag showed the opposite of the truth, and made the
+               control read as inverted: only a `change` event posts anything,
+               so turning the beat OFF meant checking the box and unchecking it
+               again. tests/test_console.py pins the two defaults together. -->
+          <input type="checkbox" id="slow-first-call" checked>
           <span>
             <span class="t">Slow first core-banking call</span>
             <span class="sub">The core takes longer to answer than our 5s timeout, so the account request looks lost and is retried.</span>

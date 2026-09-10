@@ -371,3 +371,26 @@ def test_the_gap_input_is_styled_by_type_agnostic_selectors():
     c = css()
     assert "input[type=text]" not in c, \
         "a type-scoped gap-input selector cannot style a date or number gap"
+
+
+def test_the_slow_core_checkbox_matches_the_core_banking_default():
+    """§10.1. The console never reads the core's control state — there is no
+    GET — so the checkbox is a hardcoded guess at a value another process owns.
+    While they disagreed, a fresh `make demo` showed the box unchecked over an
+    armed flag, and the control read as inverted: only a `change` event posts,
+    so turning the beat OFF meant checking the box and unchecking it again.
+
+    Pinned here because nothing else connects the two files, and the runbook
+    (Task 21 Step 2) walks the analyst straight into the timeout."""
+    core = (ROOT / "core_banking" / "app.py").read_text()
+    m = re.search(r"app\.state\.slow_first_call\s*=\s*(True|False)", core)
+    assert m, "core banking no longer sets slow_first_call at startup"
+    server_default = m.group(1) == "True"
+
+    box = re.search(r'<input[^>]*id="slow-first-call"[^>]*>', body())
+    assert box, "the slow-first-call checkbox is gone"
+    console_default = " checked" in box.group(0)
+
+    assert console_default == server_default, (
+        f"core banking starts slow_first_call={server_default} but the "
+        f"checkbox renders {'checked' if console_default else 'unchecked'}")
