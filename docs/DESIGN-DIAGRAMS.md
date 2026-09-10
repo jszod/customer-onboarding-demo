@@ -112,9 +112,23 @@ sequenceDiagram
    every attempt. That is what lets the bank's system recognise the second
    request as the same request.
 4. **The bank's system answers "duplicate" and returns the original account.**
-   The process carries on with the right account number and no human ever finds
-   out anything went wrong.
-5. **The client ID arrives separately, whenever it arrives.** The process waits
+   The process carries on with the right account number, and the only trace is
+   a second attempt in the record — which is the point: the incident happened
+   and nobody had to handle it.
+5. **The retry is run by the process, not by the platform's activity policy.**
+   The obvious implementation is to let the activity retry itself, and it
+   works — but the attempt count and the last error then live inside a
+   mechanism nothing can read. Looping in the process makes both queryable, so
+   the console can show *"attempt 2, last error: timeout"* while it is
+   happening rather than after. Visibility during the failure is most of the
+   value of demonstrating one.
+6. **"Duplicate" on the *first* attempt means something else entirely.** Then
+   no call of ours created the account — a previous onboarding did. The
+   process stops there rather than carrying on: it opens nothing, sends the
+   client nothing, and tells the specialist and their supervisor instead.
+   Same word from the bank, two situations, and conflating them would mean
+   welcoming a customer to an account they have held for months.
+7. **The client ID arrives separately, whenever it arrives.** The process waits
    without holding anything open — which is why a system that answers in
    minutes and a system that answers in days need no different handling.
 

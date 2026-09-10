@@ -81,7 +81,13 @@ key on every attempt — that is what idempotency means here, and it is why the
 second request is recognisable as the same request rather than a new one. The
 bank's system looks the key up, finds the account it already made, and answers
 "duplicate — here is the original." One account. The process carries on with
-the right number, and nobody downstream ever learns anything went wrong.
+the right number, and nobody downstream has to be told anything went wrong.
+
+Worth pointing at the screen while this happens: the console is showing
+*attempt 2* and the timeout error **as it happens**, not afterwards in a log.
+That is deliberate. The platform can retry the call for you, and if you let it,
+the attempt count and the error live somewhere nothing can read. Running the
+retry in the process itself puts both where the console can ask for them.
 
 Then the client ID comes back separately, whenever it comes back. That is the
 second wait, and it is why a core system that answers in seconds and one that
@@ -91,6 +97,14 @@ answers in three days need no different handling here.
 longer?"* — You can make it longer, and you will still have this problem, just
 more rarely and at a worse moment. The timeout is not the thing that has to be
 right. The retry is.
+
+**And if someone asks what happens on a repeat onboarding:** the same word
+comes back from the bank and means something different. "Duplicate" on the
+*first* attempt means no call of ours created that account — an earlier
+onboarding did. The process stops: no second account, no welcome pack, and the
+specialist and their supervisor hear about it rather than the customer.
+Telling those two cases apart is the difference between a clean audit trail and
+congratulating someone on an account they opened last year.
 
 ---
 

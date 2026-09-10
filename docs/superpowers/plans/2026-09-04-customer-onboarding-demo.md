@@ -6369,7 +6369,7 @@ git commit -m "feat: already_onboarded — Task 24, §10.1.1"
 - [ ] **Step 1: Run the definition of done**
 
 Run: `make verify`
-Expected: `VERIFY OK: 22/22 scenarios implemented and passing`
+Expected: `VERIFY OK: 23/23 scenarios implemented and passing`
 
 If any scenario is still skipped, that is the remaining work — do not proceed.
 
@@ -6379,7 +6379,7 @@ If any scenario is still skipped, that is the remaining work — do not proceed.
 make demo
 ```
 
-Then in the browser at `http://localhost:8000`: Submit → watch extraction → the gap panel appears with `beneficial_owners[1].dob` → try Approve without filling it (expect the validator's refusal) → fill it, tick attestation, Approve → watch `submitting_to_core` show `attempt 2, last error: timeout` → Return client ID → complete. Confirm `curl -s localhost:8001/ledger` shows **one** account.
+Then in the browser at `http://localhost:8000`: Submit → watch extraction → the gap panel appears with `beneficial_owners[1].dob` → try Approve without filling it (expect the validator's refusal) → fill it, tick attestation, Approve → watch `submitting_to_core` show `attempt 2, last error: timeout` (needs a cleared ledger -- `make demo` chains `demo-reset`; see R-036) → Return client ID → complete. Confirm `curl -s localhost:8001/ledger` shows **one** account.
 
 Then `make restart-worker` during the `awaiting_review` wait and confirm the workflow resumes.
 
@@ -6401,7 +6401,7 @@ Task 4 built the diagrams from the spec before any code existed. Re-read `docs/D
 git add README.md docs/DESIGN-DIAGRAMS.md TALK_TRACK.md
 git commit -m "docs: README, and reconcile the design artifact with the build
 
-make verify reports 22/22. Walked the demo end to end: the validator
+make verify reports 23/23. Walked the demo end to end: the validator
 refuses an approve with the gap unfilled, the core call times out and
 retries with the same key, and the ledger holds exactly one account.
 
