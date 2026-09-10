@@ -82,6 +82,45 @@ that a value in `.env` overrides it.
 `FIXTURE_MODE=1 make up && make histories` only when the workflows' command
 sequence changes on purpose — `histories/README.md` says what that means.
 
+## Commands
+
+**`make help`** prints this list, and it is generated from the targets
+themselves rather than maintained by hand, so it cannot fall behind
+`make/common.mk`. The table below is the same content for reading on the web.
+
+| | |
+|---|---|
+| **Setup** | |
+| `make deps` | `uv sync` — install everything |
+| **Running the demo** | |
+| `make demo` | reset state, start all four processes, print the URLs |
+| `make up` | start them *without* resetting — keeps the ledger, so the ambiguous-timeout beat will not re-fire |
+| `make down` | stop everything this Makefile started |
+| `make status` | which of the four processes are up, and on which ports |
+| `make logs` | tail all four process logs from `/tmp` |
+| `make demo-reset` | clear the ledger, outbox, document store and outage flag |
+| `make restart-worker` | the worker-kill beat — prove the workflow survives it |
+| **Verifying** | |
+| `make test` | run the suite under `FIXTURE_MODE=1`; no API key needed |
+| `make verify` | the definition of done: green **and** nothing skipped |
+| **Rebuilding inputs** | |
+| `make documents` | regenerate the sample PDFs under `documents/` |
+| `make fixtures` | re-record `fixtures/` against the live model (needs a key) |
+| `make histories` | re-capture `histories/`, the replay gate's input |
+| `make clean` | `down` + `demo-reset` |
+
+Two things that are easy to trip on:
+
+- **A bare `make` runs `up`**, not `help` — `.DEFAULT_GOAL := up`, because
+  these verbs exist for muscle memory across the sibling demos (§14).
+- **`make up` does not reset the ledger**, and the idempotency key is derived
+  from the client key rather than a UUID (§4.1). So the ambiguous-timeout beat
+  fires once per ledger: core banking answers `duplicate` before it reaches its
+  delay, and the "Slow first core-banking call" toggle then looks broken. Use
+  `make demo`, which chains `demo-reset`. A second onboarding for a client who
+  already has an account now terminates as `already_onboarded` and says so
+  (§10.1.1).
+
 ## Where the design lives
 
 | Document | What it is |
