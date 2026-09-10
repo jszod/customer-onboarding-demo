@@ -61,6 +61,8 @@ class OnboardingWorkflow:
         self._client_id_assignment: ClientIdAssignment | None = None
         self._core_attempt = 0
         self._core_request_id: str | None = None
+        self._core_duplicate = False
+        self._core_preexisting = False
         self._last_error: str | None = None
         self._client_id_chase = 0
 
@@ -197,8 +199,23 @@ class OnboardingWorkflow:
 
         self._core_request_id = ack.request_id
         if ack.status == "duplicate":
-            # The proof the key worked: the first call did create the account,
-            # the answer was simply lost (§10.1).
+            self._core_duplicate = True
+            if self._core_attempt == 1:
+                # §10.1.1. A duplicate on the FIRST attempt means nothing in
+                # this run created the account -- a previous onboarding for
+                # this client did. Carrying on would send a welcome pack and
+                # tell the client about an account they have held for months.
+                # Terminal business status, never a failed workflow (§10.3);
+                # `_finish` notifies the specialist and supervisor, and by
+                # §5.5.1 the end client is not on that list.
+                self._core_preexisting = True
+                return await self._finish(
+                    req, "already_onboarded", None,
+                    f"account {ack.request_id} already exists for this client "
+                    f"from an earlier onboarding; nothing was created and no "
+                    f"documents were sent")
+            # Attempt >= 2: our OWN first call created it and the answer was
+            # lost. The proof the key worked, and the headline beat (§10.1).
             workflow.logger.info(
                 "core banking returned duplicate for %s -- the idempotency key "
                 "prevented a second account", ack.request_id)
@@ -412,4 +429,6 @@ class OnboardingWorkflow:
             last_error=self._last_error, core_request_id=self._core_request_id,
             client_id=(self._client_id_assignment.client_id
                        if self._client_id_assignment else None),
-            extraction_iterations=self._iterations)
+            extraction_iterations=self._iterations,
+            core_duplicate=self._core_duplicate,
+            core_preexisting=self._core_preexisting)

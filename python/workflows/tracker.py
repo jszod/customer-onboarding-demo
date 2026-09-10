@@ -16,7 +16,14 @@ STAGE_INDEX = {"ingesting": 0, "extracting": 1, "awaiting_review": 2,
 # A finished process with a bad outcome is not a finished process with a good
 # one. R-011 drew this distinction in the console; the Temporal UI gets the
 # same treatment, and the index is the step the run stopped at.
-FAILED_AT = {"manual_intervention": 2, "rejected_by_core": 3}
+FAILED_AT = {"manual_intervention": 2, "rejected_by_core": 3,
+             # §10.1.1. It stopped AT the account step, and nothing failed --
+             # the account was already there. Marked at index 3 so the first
+             # three steps still read as done and the last three as never run,
+             # which is what happened. Without an entry here `.get()` returns
+             # None and all seven steps render as open, claiming the run never
+             # started.
+             "already_onboarded": 3}
 
 STAGE_NOTE = {
     "ingesting": "reading the client's document set",

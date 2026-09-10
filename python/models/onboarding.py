@@ -21,7 +21,8 @@ class OnboardingStatus(BaseModel):
     stage: Literal["ingesting", "extracting", "awaiting_review",
                    "submitting_to_core", "awaiting_client_id",
                    "sending_documents", "notifying", "complete",
-                   "manual_intervention", "rejected_by_core"]
+                   "manual_intervention", "rejected_by_core",
+                   "already_onboarded"]
     attempt: int
     application: ApplicationFields | None
     gaps: list[FieldGap]
@@ -31,10 +32,15 @@ class OnboardingStatus(BaseModel):
     core_request_id: str | None
     client_id: str | None
     extraction_iterations: int
+    # §10.1.1. `duplicate` means two different things and the console has to
+    # be able to say which. Query-only, so free against the replay gate (§13).
+    core_duplicate: bool = False      # core banking answered "duplicate"
+    core_preexisting: bool = False    # ...on attempt 1: a prior onboarding owns it
 
 
 class OnboardingResult(BaseModel):
-    status: Literal["completed", "manual_intervention", "rejected_by_core"]
+    status: Literal["completed", "manual_intervention", "rejected_by_core",
+                    "already_onboarded"]
     client_id: str | None
     attempts: int
     detail: str

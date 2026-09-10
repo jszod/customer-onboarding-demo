@@ -490,8 +490,11 @@ const STAGE_INDEX = {
   ingesting: 0, extracting: 1, awaiting_review: 2, submitting_to_core: 3,
   awaiting_client_id: 4, sending_documents: 5, notifying: 6, complete: 7,
   manual_intervention: 2, rejected_by_core: 3,
+  /* §10.1.1 — stopped AT the account step, and nothing failed. */
+  already_onboarded: 3,
 };
-const TERMINAL_BAD = { manual_intervention: true, rejected_by_core: true };
+const TERMINAL_BAD = { manual_intervention: true, rejected_by_core: true,
+                       already_onboarded: true };
 
 const STAGE_LABEL = {
   ingesting: "Collecting documents",
@@ -504,6 +507,7 @@ const STAGE_LABEL = {
   complete: "Account open",
   manual_intervention: "Manual intervention",
   rejected_by_core: "Rejected by core banking",
+  already_onboarded: "Client already onboarded",
 };
 const STAGE_TONE = {
   ingesting: "is-running", extracting: "is-running",
@@ -511,6 +515,9 @@ const STAGE_TONE = {
   awaiting_client_id: "is-waiting", sending_documents: "is-running",
   notifying: "is-running", complete: "is-done",
   manual_intervention: "is-alert", rejected_by_core: "is-alert",
+  /* Amber, not red: nothing failed. The account exists, which is
+     the correct state -- it was simply not opened by this run. */
+  already_onboarded: "is-waiting",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -704,6 +711,15 @@ function renderDetail(st) {
     title = "Account open";
     note = "Every step completed. The client ID below is the one and only account " +
            "opened for this application.";
+    /* §10.1.1 — the retry is the point of the demo, and until now it was
+       visible only in the worker log. `core_duplicate` without
+       `core_preexisting` means OUR first call created the account and the
+       answer was lost, which is the beat. */
+    if (st.core_duplicate && !st.core_preexisting) {
+      note += " The first core call timed out after the account had already been " +
+              "created; the retry carried the same idempotency key and core banking " +
+              "answered “duplicate”, so exactly one account exists.";
+    }
     facts = fact("Client ID", st.client_id || "—", "is-done") +
             fact("Extraction attempts", st.attempt) +
             fact("Core attempts", st.core_attempt);
@@ -720,6 +736,17 @@ function renderDetail(st) {
            "completed with a terminal business status.";
     facts = fact("Core attempts", st.core_attempt, "is-alert");
     if (st.last_error) err = '<div class="errline"><b>Reason</b> — ' + esc(st.last_error) + "</div>";
+  } else if (s === "already_onboarded") {
+    /* §10.1.1. A duplicate on the FIRST attempt: a previous onboarding owns
+       this account. Nothing failed and nothing was created. */
+    title = "Client already onboarded";
+    note = "Core banking answered “duplicate” on the first attempt, so this client " +
+           "already holds an account from an earlier onboarding. No second account " +
+           "was created, no welcome pack was sent, and the client was not contacted — " +
+           "the specialist and supervisor were notified instead.";
+    facts = fact("Existing account", st.core_request_id || "—", "is-alert") +
+            fact("Core attempts", st.core_attempt);
+    if (st.last_error) err = '<div class="errline"><b>Detail</b> — ' + esc(st.last_error) + "</div>";
   }
 
   el.innerHTML =

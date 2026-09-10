@@ -12,8 +12,8 @@ Spec §16.
 
 ## The manifest is the definition of done
 
-`tests/test_manifest.py` holds all 22 scenarios by stable ID. The build is
-complete when all 22 pass and none are skipped; `make verify` asserts
+`tests/test_manifest.py` holds all 23 scenarios by stable ID. The build is
+complete when all 23 pass and none are skipped; `make verify` asserts
 `skipped == 0`.
 
 **Reuse the manifest's exact test names.** Do not invent parallel names — the
@@ -219,3 +219,30 @@ those is text, so none of them is greppable. When you add a rule that is meant
 to *override* another, put the override last and pin the order with a test that
 compares source positions — then plant the regression and watch that test fail
 before you believe it. R-033 has the worked example.
+
+### Wait on a stage, not on the result
+
+A workflow test that awaits `handle.result()` hangs when the bug is "the
+workflow does not terminate". T-WF-10 did exactly that: against the unfixed
+code the workflow ran past the core call into `awaiting_client_id` and blocked
+on a signal that never arrived, so the test burned its 120s timeout instead of
+failing. Rewritten to `await _wait_for(handle, "<stage>", timeout=30)`, it
+fails in 20s and names the stage it actually reached.
+
+Wait on the observable state you expect, then take the result. A test that
+hangs tells you nothing and costs the whole run.
+
+### A failing workflow task presents as a hung workflow, not as an error
+
+Adding `already_onboarded` to two `Literal`s missed a third —
+`NotifyRequest.outcome`, which `_finish` validates against. The workflow task
+raised, Temporal retried it, and it raised again, forever. The symptom was a
+**query RPC timeout**; nothing anywhere said "validation error". So when a
+query times out, check the worker log for a repeating workflow-task failure
+before believing the workflow is stuck on a timer or a signal.
+
+Corollary: a stage or status value is enumerated in more places than you think.
+For this repo that is the spec, `CONTRACT.md`, `python/models/onboarding.py`,
+`python/models/delivery.py`, the workflow, `python/workflows/tracker.py`, four
+maps in the console, three test files and `make/common.mk`. Grep for a sibling
+value — `rejected_by_core` — and fix every hit before running anything.

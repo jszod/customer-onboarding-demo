@@ -13,7 +13,7 @@ artifact, sample documents, core banking, the gateway, the console, all four
 activities, the extraction child, the parent's loop and happy path, the
 recorded fixtures, and the committed histories with their replay gate.
 
-Suite: **207 passed, 0 skipped — `make verify` says `VERIFY OK: 22/22`.** The
+Suite: **230 passed, 0 skipped — `make verify` says `VERIFY OK: 23/23`.** The
 manifest is complete, so the progress bar is spent: from here a skip is a
 regression, not remaining work.
 
@@ -188,7 +188,8 @@ produces deserialization errors that look like corruption rather than config.
 - `python/models/` — every Pydantic payload
 - `web/` — gateway + console; imports **zero** worker code
 - `core_banking/` — the fake external system; never imports `temporalio`
-- `tests/` — the 22-scenario manifest (spec §16.8)
+- `tests/` — the 23-scenario manifest (spec §16.8); T-WF-10 was the one
+  scenario added after Task 1, see R-036
 - `documents/`, `fixtures/`, `histories/` — committed demo inputs and gates
 
 ## Running work autonomously

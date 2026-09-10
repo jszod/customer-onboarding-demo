@@ -144,3 +144,53 @@ async def test_the_key_is_the_parent_workflow_id(env):
         handle = await _to_core(env, queue)
         await _wait_for(handle, "awaiting_client_id")
     assert captured["key"] == handle.id
+
+
+async def assert_first_attempt_duplicate_is_already_onboarded(env):
+    """§10.1.1, T-WF-10. `duplicate` on attempt 1 means a PREVIOUS onboarding
+    owns the account -- nothing in this run created anything.
+
+    T-WF-07 is the attempt-2 case, where the same answer means "our own call
+    landed and the reply was lost". The pair is what proves the workflow tells
+    them apart; either one alone passes against code that conflates them.
+
+    The property that matters is the last assertion: the end client is never
+    told about an account they have held for months. The specialist and the
+    supervisor are, because a repeat onboarding attempt on an existing client
+    is a compliance event that wants a record (§5.5.1)."""
+    calls = {"n": 0}
+
+    @activity.defn(name="open_account")
+    async def already_there(req: OpenAccountRequest) -> OpenAccountAck:
+        calls["n"] += 1
+        return OpenAccountAck(request_id="REQ-PRIOR", status="duplicate")
+
+    stubs = Stubs()
+    queue, worker = _worker_with(env, stubs, already_there)
+    async with worker:
+        handle = await _to_core(env, queue)
+        # Wait on the STAGE, not on the result. Against code that conflates the
+        # two duplicates the workflow sails past the core call into
+        # `awaiting_client_id` and blocks on a signal that never comes, so
+        # `handle.result()` hangs the suite instead of failing it. `_wait_for`
+        # bounds that to 20s and names the stage it actually reached.
+        status = await _wait_for(handle, "already_onboarded", timeout=30)
+        result: OnboardingResult = await handle.result()
+
+    assert result.status == "already_onboarded", result.status
+    assert result.client_id is None, "this run opened no account"
+    assert calls["n"] == 1, "nothing was ambiguous, so nothing should retry"
+
+    assert status["stage"] == "already_onboarded"
+    assert status["core_duplicate"] is True
+    assert status["core_preexisting"] is True, \
+        "a duplicate on attempt 1 is a pre-existing account, not the beat"
+    assert status["core_request_id"] == "REQ-PRIOR"
+
+    assert len(stubs.notifications) == 1, stubs.notifications
+    note = stubs.notifications[0]
+    assert note["outcome"] == "already_onboarded"
+    assert note["packet_uri"] is None, "the welcome pack must not have been sent"
+    assert "end_client" not in note["recipients"], \
+        "the client must never be told about an account they already had"
+    assert set(note["recipients"]) == {"onboarding_specialist", "supervisor"}

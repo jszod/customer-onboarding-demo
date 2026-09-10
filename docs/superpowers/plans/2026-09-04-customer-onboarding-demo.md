@@ -6195,6 +6195,165 @@ git commit -m "feat: DEMO_STEP_MS paces the stubbed stages — §17.1"
 
 ---
 
+### Task 24: `already_onboarded` — the duplicate that is not the beat — TAIL, runs before Task 21
+
+§10.1.1, §5.6. Found by running the demo. The slow-first-call toggle appeared
+to do nothing, because the ledger already held `onboarding-acme-corp` from an
+earlier run and core banking returns `duplicate` **before** it reaches the
+delay. Chasing that surfaced the real defect underneath: `duplicate` means two
+different things and the workflow treats them identically.
+
+| `core_attempt` | Meaning | Today | Required |
+|---|---|---|---|
+| ≥ 2 | Our own call created it; the reply was lost | Proceeds. Correct. | Proceed, and **say so** |
+| 1 | A previous onboarding owns the account | Proceeds as if it opened one | Terminate `already_onboarded`, skip steps 5–6 |
+
+Sending a welcome pack to a client about an account they have held for months
+is wrong however it is displayed. It is **not** a workflow failure (§10.3) —
+it is a terminal business status.
+
+**Step 7 still runs, and should.** `_finish` notifies on every terminal status,
+and for anything but `completed` the recipients are the onboarding specialist
+and supervisor, **never the end client** (§5.5.1). So the client hears nothing
+and the two people who need to know get a record — which is the whole
+behaviour worth asserting.
+
+**This is the only scenario added after Task 1.** The manifest goes 22 → 23 and
+`make verify` prints `23/23`. Log the addition as a ruling, per
+`.claude/rules/testing.md`.
+
+**Replay is safe, and this was checked rather than assumed.** `core_duplicate`
+and `core_preexisting` live on `OnboardingStatus`, which is a *query* return
+type — queries are never recorded in history (§13). Adding `already_onboarded`
+widens two `Literal`s, and the committed histories recorded
+`{"status":"completed",…}`, which stays a valid member. No history takes the
+new branch, so the new `if` evaluates false during replay and emits no
+commands.
+
+**Files:**
+- Modify: `python/models/onboarding.py` — both `Literal`s, two new status fields
+- Modify: `python/workflows/onboarding.py` — the branch, and the two flags
+- Modify: `python/workflows/tracker.py` — the terminal-stage set
+- Modify: `web/static/index.html` — `STEP`, `TERMINAL_BAD`, the label, the pill
+  class, and the review-panel copy
+- Modify: `make/common.mk` — `22/22` → `23/23`
+- Test: `tests/test_manifest.py` (+`T-WF-10`), `tests/test_core_submission.py`
+  (the scenario body), `tests/test_console.py` (stage coverage picks it up)
+- Modify: `CONTRACT.md`, `.claude/rules/testing.md`, `CLAUDE.md`,
+  `docs/DEVELOPMENT-PROCESS.md` — the count
+
+- [ ] **Step 1: Write the failing scenario**
+
+`T-WF-10` in `tests/test_manifest.py`, delegating to a body in
+`tests/test_core_submission.py` beside `T-WF-07`'s. The body pre-seeds the
+`open_account` stub returns `duplicate` on its FIRST call, and the body asserts:
+the terminal status is `already_onboarded`; `open_account` was called exactly
+once (no retry — there is nothing ambiguous to retry); the single notification
+carries `outcome: already_onboarded` with **no** `packet_uri`; and its
+recipients are the specialist and supervisor with `end_client` absent. That last
+assertion is the compliance property — the customer is never told.
+
+Reuse `T-WF-07`'s fixtures and its ledger helper — do not build a second
+harness. `T-WF-07` is the attempt-2 case and must keep passing unchanged; the
+two together are what prove the distinction.
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `uv run pytest tests/test_manifest.py -k T_WF_10 -v`
+Expected: fails because `already_onboarded` is not a valid `Literal` member.
+
+- [ ] **Step 3: Widen the models**
+
+`python/models/onboarding.py`: add `"already_onboarded"` to
+`OnboardingStatus.stage` and `OnboardingResult.status`, and add
+`core_duplicate: bool = False` / `core_preexisting: bool = False` to
+`OnboardingStatus`. Defaults matter — a field without one breaks every existing
+construction.
+
+- [ ] **Step 4: Branch the workflow**
+
+In `python/workflows/onboarding.py`, where `ack.status == "duplicate"` is
+currently only logged:
+
+```python
+self._core_request_id = ack.request_id
+if ack.status == "duplicate":
+    self._core_duplicate = True
+    if self._core_attempt == 1:
+        # §10.1.1. Nothing in THIS run created the account -- a previous
+        # onboarding for this client did. Delivering a welcome pack and
+        # notifying the client would be wrong, so stop here. A terminal
+        # business status, never a failed workflow (§10.3).
+        self._core_preexisting = True
+        return await self._finish(
+            req, "already_onboarded", None,
+            f"account {ack.request_id} already existed for this client; "
+            f"no second account was created and nothing was sent")
+    # Attempt >= 2: our own first call created it and the answer was lost.
+    # This is the beat working (§10.1).
+    workflow.logger.info(
+        "core banking returned duplicate for %s -- the idempotency key "
+        "prevented a second account", ack.request_id)
+```
+
+Initialise both flags in `__init__` and return them from the `status` query.
+
+- [ ] **Step 5: Place the new stage**
+
+`python/workflows/tracker.py` — add `already_onboarded` to the terminal set,
+crossing the step it stopped at rather than ticking all seven. R-021 fixed
+exactly this for `manual_intervention` and `rejected_by_core`; the new stage
+stops at step 4.
+
+`web/static/index.html` — `STEP` (position 4, beside `rejected_by_core`'s 3),
+`TERMINAL_BAD`, a `STAGE_LABEL` of "Client already onboarded", and a pill class.
+`is-alert` overstates it — nothing failed — so use `is-waiting`'s amber or add a
+neutral tone. Then say which duplicate happened, from `core_preexisting`.
+
+- [ ] **Step 6: Run the suite**
+
+Run: `uv run pytest -q`
+Expected: `T-WF-10` passes, `T-WF-07` still passes, and
+`test_every_status_stage_has_a_stepper_position` picks up the new stage without
+edits — it iterates the stage list.
+
+- [ ] **Step 7: Move the definition of done to 23**
+
+`make/common.mk`'s echo, `tests/test_manifest.py`'s docstring,
+`.claude/rules/testing.md`, `CLAUDE.md` and `docs/DEVELOPMENT-PROCESS.md`.
+Then `make verify` — expected `VERIFY OK: 23/23`.
+
+- [ ] **Step 8: Prove the replay gate still holds**
+
+Run: `uv run pytest tests/test_replay.py -v`
+Expected: all four pass **without re-capturing anything.** If a replay test
+goes red, the branch changed a command path it should not have — fix the code,
+never the history.
+
+- [ ] **Step 9: Watch both cases in the live stack**
+
+```bash
+make demo                 # ledger cleared: attempt 2 duplicate, the beat
+# then, without demo-reset, submit again for the same client:
+make up                   # ledger retained: attempt 1 duplicate
+```
+
+The first run must reach `complete` with the console showing the retry. The
+second must stop at `already_onboarded` with nothing in `outbox/`.
+
+- [ ] **Step 10: Log the ruling and commit**
+
+The scenario addition needs a `RULINGS.md` entry — the manifest is the
+definition of done and it just changed.
+
+```bash
+git add python/ web/static/index.html tests/ make/common.mk CONTRACT.md \
+        .claude/rules/testing.md CLAUDE.md docs/
+git commit -m "feat: already_onboarded — Task 24, §10.1.1"
+```
+
+---
+
 ### Task 21: Final verification and the README — TAIL, sequential, runs AFTER Task 22
 
 **Files:**

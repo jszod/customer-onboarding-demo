@@ -301,7 +301,8 @@ not** carry the client ID — that is the point of the async return path, and
 { "delivered_to": ["onboarding_specialist"] }
 ```
 
-`outcome` is one of `completed`, `manual_intervention`, `rejected_by_core`.
+`outcome` is one of `completed`, `manual_intervention`, `rejected_by_core`,
+`already_onboarded`.
 `recipients` entries are `onboarding_specialist`, `end_client`, `supervisor`.
 `notify` is one activity with three callers — the terminal notification, the
 SLA reminder and the escalation — distinguished by `recipients`.
@@ -323,7 +324,13 @@ than duplicating; `notify` appends a record keyed by
 
 `stage` is one of `ingesting`, `extracting`, `awaiting_review`,
 `submitting_to_core`, `awaiting_client_id`, `sending_documents`, `notifying`,
-`complete`, `manual_intervention`, `rejected_by_core`.
+`complete`, `manual_intervention`, `rejected_by_core`, `already_onboarded`.
+
+`already_onboarded` is terminal: core banking answered `duplicate` on the
+**first** attempt, so a previous onboarding owns the account and this run
+created nothing (§10.1.1). The status also carries `core_duplicate` and
+`core_preexisting` so a client can tell that case from the retry case, where
+the same `duplicate` means our own call landed and the answer was lost.
 
 ### `OnboardingResult` — returned by the parent workflow
 
@@ -334,7 +341,8 @@ than duplicating; `notify` appends a record keyed by
 }
 ```
 
-`status` is one of `completed`, `manual_intervention`, `rejected_by_core`.
+`status` is one of `completed`, `manual_intervention`, `rejected_by_core`,
+`already_onboarded`.
 **Every failure path ends in one of these**, never a failed workflow.
 
 ## Gateway HTTP surface

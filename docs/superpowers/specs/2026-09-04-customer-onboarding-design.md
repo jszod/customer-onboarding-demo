@@ -424,7 +424,8 @@ class OnboardingStatus(BaseModel):
     stage: Literal["ingesting", "extracting", "awaiting_review",
                    "submitting_to_core", "awaiting_client_id",
                    "sending_documents", "notifying", "complete",
-                   "manual_intervention", "rejected_by_core"]
+                   "manual_intervention", "rejected_by_core",
+                   "already_onboarded"]
     attempt: int
     application: ApplicationFields | None
     gaps: list[FieldGap]
@@ -434,13 +435,22 @@ class OnboardingStatus(BaseModel):
     core_request_id: str | None
     client_id: str | None
     extraction_iterations: int
+    core_duplicate: bool = False      # core banking answered "duplicate"
+    core_preexisting: bool = False    # ...on attempt 1 (§10.1.1)
 
 class OnboardingResult(BaseModel):
-    status: Literal["completed", "manual_intervention", "rejected_by_core"]
+    status: Literal["completed", "manual_intervention", "rejected_by_core",
+                    "already_onboarded"]
     client_id: str | None
     attempts: int
     detail: str
 ```
+
+`core_duplicate` and `core_preexisting` are **query-only**: queries are never
+recorded in history (§13), so they are free against the §16.5 replay gate.
+`already_onboarded` widens two `Literal`s, which is also replay-safe — the
+`"completed"` already in the committed histories stays a valid member. See
+§10.1.1 for why the two duplicate cases must not be conflated.
 
 ## 6. The wire surface
 
@@ -731,6 +741,53 @@ prevent.
 
 Slow-first-call is the **default** behaviour so the beat happens on every run;
 a console toggle disables it for a clean pass.
+
+**The beat fires once per ledger.** The idempotency key is the workflow ID,
+which §4.1 derives from the client key rather than a UUID — so it is the *same
+key on every run*. Core banking answers `duplicate` before it reaches the
+delay, which is correct (a fast duplicate is the proof the key worked) but
+means the slow call cannot fire a second time for the same client until the
+ledger is cleared. `make demo` chains `demo-reset`; `make up` alone does not.
+§14 says so in the runbook, because the toggle otherwise looks broken.
+
+### 10.1.1 `duplicate` means two different things
+
+`status: "duplicate"` is returned in two situations that the workflow can
+distinguish and must not conflate.
+
+| `core_attempt` | What happened | What it means |
+|---------------|---------------|---------------|
+| **≥ 2** | Our own earlier call created the account; the answer was lost | §10.1's beat, working. Proceed. |
+| **1** | A **previous onboarding** for this client already owns the account | Nothing in this run created anything |
+
+The second case is reachable in business terms, not just as a demo artifact: a
+workflow ID of `onboarding-<client-key>` stops two *open* onboardings for one
+client, but nothing stops a second one after the first completes.
+
+**Attempting the call is still correct in both cases.** There is no pre-check
+and there should not be one — asking idempotently *is* the safe way to find
+out whether an account exists, and a pre-check would introduce the
+read-then-write race the idempotency key exists to remove.
+
+**A first-attempt duplicate terminates the workflow as `already_onboarded`.**
+The client-ID wait (step 5) and the welcome pack (step 6) are skipped: sending
+a pack and telling a client about an account they have held for months is wrong
+however it is displayed. It is **not** a workflow failure (§10.3) — it is a
+terminal business status.
+
+Step 7 still runs, and that is the point rather than an exception. `_finish`
+notifies on every terminal status, and for anything other than `completed` the
+recipients are the **onboarding specialist and supervisor, never the end
+client** (§5.5.1). So the outcome is exactly what a bank wants from a repeat
+onboarding attempt on an existing client: nothing sent to the customer, and a
+record in front of the two people who need to see it.
+
+`OnboardingStatus` carries `core_duplicate` and `core_preexisting` so the
+console can state which of the two happened. Both are query-only fields:
+queries are never recorded in history (§13), so they cost nothing against the
+§16.5 replay gate. Adding `already_onboarded` to the two `Literal`s is
+likewise replay-safe — widening a union does not invalidate the `"completed"`
+already recorded in the committed histories.
 
 ### 10.2 Retry policies
 
@@ -1248,11 +1305,19 @@ and its output is reviewed in the diff.
 
 ### 16.8 The scenario manifest — the definition of done
 
-**The twenty-two scenarios below are exhaustive. The build is complete when all
-twenty-two pass and none are skipped.** This exists so completeness is a
+**The twenty-three scenarios below are exhaustive. The build is complete when
+all twenty-three pass and none are skipped.** This exists so completeness is a
 *command*, not a judgement an agent makes about its own work. Prose an agent
 must re-read and self-assess against is how a run ends with six tests written
 and a confident report of success.
+
+**`T-WF-10` was added after the build began**, when running the demo exposed
+§10.1.1 — that `duplicate` means two different things and the workflow was
+conflating them. It is the only addition, and the one the rule in
+`.claude/rules/testing.md` anticipates: *"Adding a scenario is allowed: add a
+row with a new ID and log the addition as a ruling. Silently dropping one is
+not."* The original set was twenty-two, which is what Task 1 stubbed and what
+every task before Task 22 was measured against.
 
 **Task 1 writes all twenty-two as `@pytest.mark.skip` stubs**, named by ID,
 with the scenario text as the docstring. Every subsequent turn can then run
@@ -1272,6 +1337,7 @@ with the scenario text as the docstring. Every subsequent turn can then run
 | `T-WF-07` | Timeout then duplicate → workflow proceeds, ledger holds exactly one account | 16.2 |
 | `T-WF-08` | Core rejects the application → `rejected_by_core` | 16.2 |
 | `T-WF-09` | `ChildWorkflowError` counts as a spent attempt | 16.2 |
+| `T-WF-10` | Duplicate on the **first** core attempt → `already_onboarded`, delivery skipped | 16.2 |
 | `T-TIME-01` | Remind fires at `SLA_REMIND`, escalate at `SLA_ESCALATE`, workflow still waiting | 16.3 |
 | `T-TIME-02` | **Far past both SLAs, stage is still `awaiting_review`** — never auto-approves | 16.3 |
 | `T-TIME-03` | `CLIENT_ID_SLA` fires and does not abandon the workflow | 16.3 |

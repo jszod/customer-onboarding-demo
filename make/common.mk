@@ -100,7 +100,7 @@ verify:
 	  if grep -qE "^SKIPPED \[|[0-9]+ skipped" /tmp/onboarding-verify.log; then \
 	    echo "VERIFY FAILED: skipped tests remain (§16.8)"; exit 1; \
 	  fi; \
-	  echo "VERIFY OK: 22/22 scenarios implemented and passing"
+	  echo "VERIFY OK: 23/23 scenarios implemented and passing"
 
 documents:
 	cd $(ROOT) && uv run python tools/make_documents.py

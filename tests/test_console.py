@@ -151,7 +151,8 @@ def test_every_status_stage_has_a_stepper_position():
     for stage in ("ingesting", "extracting", "awaiting_review",
                   "submitting_to_core", "awaiting_client_id",
                   "sending_documents", "notifying", "complete",
-                  "manual_intervention", "rejected_by_core"):
+                  "manual_intervention", "rejected_by_core",
+                  "already_onboarded"):
         assert re.search(rf"\b{stage}\b", b), f"stage {stage} unhandled"
 
 

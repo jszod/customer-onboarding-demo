@@ -1751,3 +1751,69 @@ the measurement instead of the fault is how this would have come back.
 this is one line in one file rather than a pattern an implementer will meet
 repeatedly. The comment in `common.mk` is where someone editing these recipes
 will actually be looking.
+
+## R-036 — the manifest grows to 23: `duplicate` meant two things
+
+**Found by running the demo, and only because a different thing looked broken.**
+The "Slow first core-banking call" toggle appeared to do nothing. It wasn't the
+toggle: the ledger still held `onboarding-acme-corp` from an earlier run, and
+core banking returns `duplicate` *before* it reaches the delay. The idempotency
+key is the workflow ID, which §4.1 derives from the client key rather than a
+UUID, so it is the same key on every run — the slow call can only fire once per
+ledger. `make demo` chains `demo-reset`; `make up` does not.
+
+Chasing that surfaced the real defect. `status: "duplicate"` means two
+different things and the workflow treated them identically:
+
+- **attempt ≥ 2** — our own call created the account, the answer was lost. The
+  headline beat, working. Proceed.
+- **attempt 1** — a *previous* onboarding owns the account. Nothing in this run
+  created anything, and the workflow carried on to send a welcome pack and
+  notify the client about an account they had held for months.
+
+The second case is reachable in business terms, not only as a demo artifact: a
+workflow ID of `onboarding-<client-key>` forbids two *open* onboardings for one
+client, but nothing forbids a second one after the first completes.
+
+**Attempting the call stays correct in both cases.** There is no pre-check and
+there should not be one — asking idempotently *is* how you find out safely, and
+a pre-check would reintroduce the read-then-write race the key exists to
+remove. What was wrong was not distinguishing the answer.
+
+`already_onboarded` is now a terminal business status (§10.3 — never a failed
+workflow). Steps 5 and 6 are skipped. Step 7 still runs and should: `_finish`
+notifies on every terminal status and for anything but `completed` the
+recipients are the specialist and supervisor, **never the end client** (§5.5.1).
+So the customer hears nothing and the two people who need a record get one,
+which is what a bank wants from a repeat onboarding attempt.
+
+**This is the one scenario added after Task 1**, so the manifest is 23 and
+`make verify` prints `23/23`. `.claude/rules/testing.md` allows exactly this —
+"add a row with a new ID and log the addition as a ruling" — and this is that
+ruling. T-WF-07 (attempt 2) and T-WF-10 (attempt 1) are only meaningful as a
+pair: either alone passes against code that conflates them.
+
+**Replay was checked, not assumed.** I first told the user this change would
+force a re-capture of the committed histories. It does not. `core_duplicate`
+and `core_preexisting` sit on `OnboardingStatus`, a *query* return type, and
+queries are never recorded (§13). Widening two `Literal`s is also safe: the
+histories recorded `{"status":"completed",…}`, which stays a valid member, and
+no history takes the new branch, so the added `if` emits no commands. All four
+T-REPLAY scenarios pass with `histories/` untouched.
+
+**Two things the change taught, both worth more than the feature.**
+
+1. **A stage list is enumerated in twelve places.** Adding one value touched
+   the spec, `CONTRACT.md`, two model files, the workflow, the tracker, the
+   console's four maps, three test files and `make/common.mk`. The one that
+   bit was `NotifyRequest.outcome` — a `Literal` in `python/models/delivery.py`
+   that `_finish` validates against. Missing it did not raise a test failure:
+   the workflow task failed and *retried in a loop*, so the symptom was a
+   **query RPC timeout**, not a validation error. A failing workflow task looks
+   like a hung workflow.
+2. **A test that hangs is worse than a test that fails.** T-WF-10 first waited
+   on `handle.result()`, and against the unfixed code the workflow sailed past
+   the core call into `awaiting_client_id` and blocked on a signal that never
+   came — so the test hung for 120s instead of failing. Rewritten to wait on
+   the *stage* with a bounded `_wait_for`, it fails in 20s and names the stage
+   it actually reached. Promoted to `.claude/rules/testing.md`.

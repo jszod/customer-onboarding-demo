@@ -207,7 +207,8 @@ rules, patterns, and troubleshooting references.
       all four activities, the extraction child, the parent's loop and happy
       path, the recorded fixtures, and the committed histories with their
       replay gate. Suite: 207 passed, 0 skipped; `make verify` reports
-      `VERIFY OK: 22/22`. Executed subagent-driven, one task per dispatch.
+      `VERIFY OK: 22/22` at the time. Executed subagent-driven, one task per
+      dispatch.
       Every deviation is logged in [RULINGS.md](RULINGS.md).
 - [ ] **Stage 3 — Build — Task 22, then Task 21.** Task 22 implements §13.1
       against `web/static/index.html`; its Step 1 is a mockup that must be
