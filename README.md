@@ -217,7 +217,7 @@ themselves rather than maintained by hand, so it cannot fall behind
 | `make down` | stop everything this Makefile started |
 | `make status` | which of the four processes are up, and on which ports |
 | `make logs` | tail all four process logs from `/tmp` |
-| `make demo-reset` | clear the ledger, outbox, document store and outage flag |
+| `make demo-reset` | clear state so you can Submit again — **no restart needed**; drops the ledger, `outbox/`, the document store and the outage flag |
 | `make restart-worker` | the worker-kill beat — prove the workflow survives it |
 | **Verifying** | |
 | `make test` | run the suite under `FIXTURE_MODE=1`; no API key needed |

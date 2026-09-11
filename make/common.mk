@@ -71,6 +71,17 @@ up: temporal core-banking gateway worker  ## 2 demo|start Temporal, core banking
 demo: demo-reset up  ## 2 demo|reset state, start all four processes, print the URLs
 	@echo "  ready — click Submit on the console"
 
+# `.llm_down` is the §10.4 outage toggle. It sits beside `.store` rather than
+# inside it (the flag path is DOCUMENT_STORE's PARENT, which defaults to the
+# repo root), so `rm -rf .store` does not take it -- and an outage toggled on
+# during one demo would still be on at the start of the next.
+demo-reset:  ## 2 demo|clear state so you can Submit again — no restart needed
+	rm -rf $(ROOT)/.store $(ROOT)/outbox $(ROOT)/core_banking/ledger.db \
+	       $(ROOT)/.llm_down
+	@echo "application state cleared"
+
+clean: down demo-reset  ## 4 build|down + demo-reset
+
 # The four start targets delegate to one script, and that indirection is the
 # whole point: a recipe that greps for `[t]emporal server start-dev` while also
 # CONTAINING `temporal server start-dev` matches its own shell, so the guard
@@ -143,13 +154,3 @@ fixtures:  ## 4 build|re-record fixtures/ against the live model (needs a key)
 histories:  ## 4 build|re-capture histories/ from a live run (replay gate input)
 	cd $(ROOT) && FIXTURE_MODE=$${FIXTURE_MODE:-1} uv run python tools/capture_histories.py
 
-# `.llm_down` is the §10.4 outage toggle. It sits beside `.store` rather than
-# inside it (the flag path is DOCUMENT_STORE's PARENT, which defaults to the
-# repo root), so `rm -rf .store` does not take it -- and an outage toggled on
-# during one demo would still be on at the start of the next.
-demo-reset:  ## 2 demo|clear the ledger, outbox, document store and LLM-outage flag
-	rm -rf $(ROOT)/.store $(ROOT)/outbox $(ROOT)/core_banking/ledger.db \
-	       $(ROOT)/.llm_down
-	@echo "application state cleared"
-
-clean: down demo-reset  ## 4 build|down + demo-reset
