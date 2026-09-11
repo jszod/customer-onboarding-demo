@@ -192,15 +192,19 @@ rules, patterns, and troubleshooting references.
       [demo-brief.md](demo-brief.md).
 - [x] **Spec review cleared** — the hard gate. Planning proceeded on the
       approved spec.
-- [x] **Stage 2 — Plan.** 22 tasks, 142 steps, written to
+- [x] **Stage 2 — Plan.** 26 tasks, 182 steps, written to
       [`docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md`](superpowers/plans/2026-09-04-customer-onboarding-demo.md)
       and self-reviewed against the spec. The self-review closed four coverage
       gaps: §19.1 dotted paths for list members, §19.3 an edit to an optional
       field, §19.4 no fourth child on final rejection, and §10.4's LLM-outage
       toggle, which the console surfaced but no activity consumed.
-      **Amended after Stage 3 began:** Task 22 was added for §13.1, the
-      console's visual system, which §13 had deferred to Stage 3 without a
-      spec. Spec first, then plan, then code — see R-029.
+      **Amended four times after Stage 3 began**, each spec-first per R-029:
+      Task 22 for §13.1 (the console's visual system, which §13 had deferred
+      to Stage 3 without a spec), Task 23 for §17.1 (stage pacing), Task 24
+      for §10.1.1 (`already_onboarded`, which also took the manifest from 22
+      scenarios to 23 — see R-036), Task 25 for R-037 (the core retry back on
+      the activity's RetryPolicy), and Task 26 for §14.1 (`demo.sh`, after the
+      repo gained a fourth audience in §2).
 - [x] **Stage 3 — Build — Tasks 1–20.** Skeleton and config, models and
       `CONTRACT.md`, the 22-scenario manifest, the design artifact, sample
       documents, core banking, the gateway, the console's functional surface,
@@ -210,10 +214,15 @@ rules, patterns, and troubleshooting references.
       `VERIFY OK: 22/22` at the time. Executed subagent-driven, one task per
       dispatch.
       Every deviation is logged in [RULINGS.md](RULINGS.md).
-- [ ] **Stage 3 — Build — Task 22, then Task 21.** Task 22 implements §13.1
-      against `web/static/index.html`; its Step 1 is a mockup that must be
-      approved before any CSS moves, because §13.1 was written from reading
-      the stylesheet rather than looking at the rendered page. Task 21 —
-      final verification and the README — runs last, because it walks the
-      console by hand and writes the README against what it sees.
+- [x] **Stage 3 — Build — Tasks 22–25, then 21.** The console's visual
+      system (§13.1), stage pacing (§17.1), `already_onboarded` (§10.1.1), the
+      core retry returned to its activity policy (R-037), and finally Task 21's
+      verification and README. Suite: 234 passed, 0 skipped,
+      `VERIFY OK: 23/23`. **Six of these commits came from running the demo
+      rather than from the suite**, which stayed green through all of them —
+      R-034 through R-037.
+- [ ] **Stage 3 — Build — Task 26.** `demo.sh` (§14.1): one bash script for
+      every platform, PID files replacing `pgrep`/`pkill`, and `make` recipes
+      calling it. Written, not built. The repo is going to a customer who runs
+      it himself on Windows — §2's fourth audience.
 - [ ] Stage 4 — Verify

@@ -6,40 +6,40 @@ workflow. Headlines the ambiguous-timeout / idempotency failure.
 
 ## Current stage — read this first
 
-**Plan Tasks 1–20 have landed. Task 22 is next, then Task 21 closes it out.**
-The number is a label, not a position — see the doc table below. Skeleton and
-config, models and `CONTRACT.md`, the 22-scenario manifest, the design
-artifact, sample documents, core banking, the gateway, the console, all four
-activities, the extraction child, the parent's loop and happy path, the
-recorded fixtures, and the committed histories with their replay gate.
+**Plan Tasks 1–25 have landed. Task 26 is the only one left, and it is
+written but not built.** Skeleton and config, models and `CONTRACT.md`, the
+manifest, the design artifact, sample documents, core banking, the gateway,
+the console and its visual system, all four activities, the extraction child,
+the parent's loop and happy path, the recorded fixtures, the committed
+histories with their replay gate, stage pacing, `already_onboarded`, the
+README, and the reconciled design artifact.
 
-Suite: **230 passed, 0 skipped — `make verify` says `VERIFY OK: 23/23`.** The
+Suite: **234 passed, 0 skipped — `make verify` says `VERIFY OK: 23/23`.** The
 manifest is complete, so the progress bar is spent: from here a skip is a
 regression, not remaining work.
 
-**Two pieces of work remain, and only one of them is in the plan.**
+**Task 26 — `demo.sh`, the entry point that assumes nothing.** §14.1 and the
+task are both written; no code exists yet. The repo is being handed to a
+customer who runs it himself on Windows with no `make`, which §2 now names as
+a fourth audience. One bash script serves every platform, PID files replace
+`pgrep`/`pkill`, and `make` recipes call the script so there is one
+implementation and two front doors.
 
-1. **Task 22** — the console's visual system, and it runs **first**. §13.1 is
-   written, Task 22 is written, and the approved mockup is shot into
-   `docs/design/` — the code is what has not caught up.
-   `web/static/index.html` still carries the thirteen font sizes and eight
-   weights it accumulated across Tasks 8, 11 and 18. Step 1 is to re-read the
-   mockup, not to build one.
-2. **Task 21** — final verification and growing the README. The plan's last
-   task; it consumes everything and produces nothing new. It runs **after**
-   Task 22, because it walks the console by hand and writes the README against
-   what it sees.
+Three things in that task were **measured, not assumed** — do not re-derive
+them and do not simplify past them:
 
-Constraints any visual pass inherits: `tests/test_console.py` pins 20
-behaviours, including light/dark adaptation and **no external scripts or
-stylesheets** — no CDN fonts, no Tailwind. And those tests grep the page as
-text, so they pass against a page whose JavaScript throws; drive it in a real
-browser before believing it (`.claude/rules/testing.md`, R-022).
+- `uv run` forks a child python and the **child** binds the port, so `$!`
+  records `uv` and killing it orphans the listener. Start the venv interpreter
+  directly and `$!` is the port owner.
+- `nohup cmd &` keeps `$!` correct, because `nohup` execs rather than forks.
+- Git Bash ships `rm`, `tail`, `grep`, `nohup`, `kill` and `mkdir` but **not**
+  `procps` — `pgrep` is the one tool that would break the customer, and it is
+  also what cost R-001 and R-025.
 
-**Changing the design means changing the spec first.** R-029 is the worked
-example: the root `Makefile` shape moved spec → plan → code, in that order,
-because a ruling cannot overrule the binding authority. §13.1 followed the
-same order — the spec was amended before any CSS moved.
+**Six of the last nine commits came from running the demo, not from the
+suite**, which was green through every one of them. R-034 through R-037 are
+where the reasoning lives. If you are about to trust a green suite about
+anything user-facing, read those four first.
 
 **Task 20 was the first task to run the live stack, and it found three
 things.** `make up` had never started anything (R-025 — the guard matched its
@@ -90,7 +90,7 @@ the CLI too.
 | Document | What it is |
 |----------|------------|
 | `docs/superpowers/specs/2026-09-04-customer-onboarding-design.md` | **The binding authority.** 22 sections. Settles everything. |
-| `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 22 tasks, 142 steps. How the spec gets built. **Task 22 runs before Task 21** — the number is a label, not a position, as with Task 4's `SCHEDULE FIRST`. |
+| `docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md` | 26 tasks, 182 steps. How the spec gets built. **Numbers are labels, not positions** — Task 4 is `SCHEDULE FIRST`, and Tasks 22–25 all ran before Task 21. |
 | `docs/RULINGS.md` | **The execution log.** Every deviation from the plan, with its reasoning. Its header carries the rule of two — when a ruling gets promoted into `.claude/rules/`. R-014's deferred console work landed in Task 18 as R-022; no open questions remain. **R-021–R-023 were renumbered from R-017–R-019 when the Task 18 branch merged `main`** — two branches wrote those three numbers in parallel, and the commit messages still use the old ones. |
 | `docs/demo-brief.md` | 11 numbered decisions with the reasoning and the **rejected** alternatives. |
 | `docs/DEVELOPMENT-PROCESS.md` | The four-stage process this repo follows. |
