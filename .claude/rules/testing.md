@@ -12,8 +12,8 @@ Spec §16.
 
 ## The manifest is the definition of done
 
-`tests/test_manifest.py` holds all 22 scenarios by stable ID. The build is
-complete when all 22 pass and none are skipped; `make verify` asserts
+`tests/test_manifest.py` holds all 23 scenarios by stable ID. The build is
+complete when all 23 pass and none are skipped; `make verify` asserts
 `skipped == 0`.
 
 **Reuse the manifest's exact test names.** Do not invent parallel names — the
@@ -68,10 +68,15 @@ of those tests passes against a page whose JavaScript throws on load.
 So when you change console behaviour, check the behaviour:
 
 - `node --check` on the extracted `<script>` catches a syntax error in seconds.
-- A headless browser catches the rest. Chromium is available at
-  `/opt/pw-browsers/`, and `uv run --with playwright` gets the driver without
-  touching `pyproject.toml`. Stub the gateway's routes, drive the control, and
-  assert on the intercepted request body.
+- A headless browser catches the rest. `uv run --with playwright` gets the
+  driver without touching `pyproject.toml`. Stub the gateway's routes, drive
+  the control, and assert on the intercepted request body.
+
+  **Getting a browser depends on where you are.** In a container, Chromium is
+  at `/opt/pw-browsers/`. On macOS that path does not exist — use
+  `p.chromium.launch(channel="chrome")`, which drives the Chrome already in
+  `/Applications` and downloads nothing. Task 22 ran the whole visual audit
+  that way. Reach for `playwright install chromium` only if neither is there.
 
 R-022 did exactly this for the editable field table, and the check is what
 turned "the substring is present" into "the analyst's correction reaches
@@ -200,3 +205,44 @@ written correctly in `prompts.TOOLS` but never sent is worth nothing.
 And run the real thing once, deliberately, when a task first makes it possible.
 `make fixtures` is that run for the model call. Same shape as R-022's rule for
 the console: grepping the page is not driving it.
+
+### A grep cannot see the cascade
+
+`test_there_is_exactly_one_breakpoint` passed while the breakpoint did nothing.
+Task 22 put `.cols { grid-template-columns: 1fr }` in a media block 115 lines
+*above* the unconditional `.cols` rule; `@media` adds no specificity, so the
+later rule won and the columns never collapsed. The text search found one
+breakpoint, the right selector and the right value — and all three were true.
+
+CSS behaviour is decided by cascade order, media state and DOM state. None of
+those is text, so none of them is greppable. When you add a rule that is meant
+to *override* another, put the override last and pin the order with a test that
+compares source positions — then plant the regression and watch that test fail
+before you believe it. R-033 has the worked example.
+
+### Wait on a stage, not on the result
+
+A workflow test that awaits `handle.result()` hangs when the bug is "the
+workflow does not terminate". T-WF-10 did exactly that: against the unfixed
+code the workflow ran past the core call into `awaiting_client_id` and blocked
+on a signal that never arrived, so the test burned its 120s timeout instead of
+failing. Rewritten to `await _wait_for(handle, "<stage>", timeout=30)`, it
+fails in 20s and names the stage it actually reached.
+
+Wait on the observable state you expect, then take the result. A test that
+hangs tells you nothing and costs the whole run.
+
+### A failing workflow task presents as a hung workflow, not as an error
+
+Adding `already_onboarded` to two `Literal`s missed a third —
+`NotifyRequest.outcome`, which `_finish` validates against. The workflow task
+raised, Temporal retried it, and it raised again, forever. The symptom was a
+**query RPC timeout**; nothing anywhere said "validation error". So when a
+query times out, check the worker log for a repeating workflow-task failure
+before believing the workflow is stuck on a timer or a signal.
+
+Corollary: a stage or status value is enumerated in more places than you think.
+For this repo that is the spec, `CONTRACT.md`, `python/models/onboarding.py`,
+`python/models/delivery.py`, the workflow, `python/workflows/tracker.py`, four
+maps in the console, three test files and `make/common.mk`. Grep for a sibling
+value — `rejected_by_core` — and fix every hit before running anything.

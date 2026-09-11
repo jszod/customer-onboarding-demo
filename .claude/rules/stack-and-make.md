@@ -129,3 +129,31 @@ subprocess inherits it (R-020). Nothing in `python/` reads a `.env` file. A
 variable that must reach the worker has to be in that file or in the
 environment of the `make` invocation — setting it inside a recipe's shell
 reaches nothing else.
+
+## A stale worker presents as an HTTP timeout, not as stale code
+
+`make up` and `make demo` guard the worker with `pgrep`, so **they will not
+restart a worker that is already running** — by design, the guard is what makes
+the targets idempotent. The cost is that a worker keeps the classes it imported
+at startup. Change a model and the running worker still holds the old one.
+
+The symptom is not an import error. In R-037 a worker predating an added field
+raised `AttributeError: 'OpenAccountAck' object has no attribute 'attempt'`,
+which failed the **workflow task** — and workflow tasks retry forever. So the
+`status` query could never be served, and what surfaced was
+`httpx.ReadTimeout` on a status poll 30 seconds later, in a tool that had not
+changed.
+
+After editing anything under `python/`, `make restart-worker`. If a stack
+behaves as though your change is not there, check the worker's start time
+against the file's mtime before debugging the code:
+
+    ps -o lstart= -p $(pgrep -f '[p]ython.worker')
+    stat -f '%Sm' python/models/whatever.py
+
+**And pass the mode to the target that starts the worker.** `FIXTURE_MODE=1
+make histories` sets it for the capture tool, not for the worker a separate
+`make restart-worker` just started — that one came up live. R-037 captured a
+whole set of histories against the real API that way. `grep 'call_llm
+implementation' /tmp/onboarding-worker.log` is the one-line check, and it is
+worth running before every capture.

@@ -5220,13 +5220,13 @@ disagree. §13.1 ratifies the palette and fixes everything else.
 **This task adds no manifest scenarios.** The §16.8 manifest is complete at 22
 and `make verify` prints that count as a literal string. Do **not** invent
 `T-CONSOLE-*` IDs — these are ordinary tests. `tests/test_console.py` grows
-from 20 behaviours to 30.
+from 20 behaviours to 31.
 
 **Files:**
 - Modify: `web/static/index.html` — the `<style>` block only (284 of 947 lines).
   No markup or JavaScript changes; the existing 20 tests must keep passing
   untouched.
-- Test: `tests/test_console.py` — append ten tests
+- Test: `tests/test_console.py` — append eleven tests
 - Modify: `.claude/rules/testing.md` — correct the browser path (see Step 14)
 
 **Interfaces:**
@@ -5454,12 +5454,30 @@ def test_every_strong_fill_carries_its_ink_token():
     token *declaration* may hold a literal."""
     literals = re.findall(r"(?<!-)\bcolor:\s*(#[0-9a-fA-F]{3,8})", css())
     assert literals == [], f"hardcoded foreground colours: {literals}"
+
+
+def test_the_responsive_block_comes_after_the_rules_it_overrides():
+    """§13.1.4 — `@media` contributes nothing to specificity, so a 900px block
+    written above the unconditional `.cols` rule loses the cascade to it and
+    the columns never collapse. Every other test in this file still reports
+    green when that happens: the breakpoint is present, the declaration is
+    present, only the order is wrong. Source order is the whole mechanism, so
+    source order is what this pins."""
+    c = css()
+    media = c.index("@media (max-width: 900px)")
+    late = [s for s in (".cols {", ".stepper {") if c.index(s) > media]
+    assert not late, f"declared after the 900px block, so it overrides it: {late}"
 ```
+
+The last one is R-033's guard and it was added *after* Step 11 shipped the bug
+it describes. Prove it by planting the regression — move the media block back
+above `.cols` and watch it fail — because a guard nobody has seen fail is a
+guess.
 
 - [ ] **Step 3: Run the new tests to verify they fail**
 
 Run: `uv run pytest tests/test_console.py -v`
-Expected: the 20 existing tests PASS; all 10 new tests FAIL.
+Expected: the 20 existing tests PASS; all 11 new tests FAIL.
 `test_the_type_scale_is_six_sizes` should report the off-scale set
 `['11.5px', '12px', '12.5px', '13.5px', '14.5px', '15.5px', '16px', '19px']` —
 note the **16px**, which is the base hiding in `body`'s `font:` shorthand and
@@ -5668,7 +5686,18 @@ Expected: PASS. If it fails, the message names each offender.
 - [ ] **Step 11: One breakpoint, and make the stepper scroll**
 
 Delete `@media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }`
-and fold `.cols` into the 900px query. Replace the stepper's column collapse:
+and fold `.cols` into the 900px query.
+
+**Put the whole responsive block at the END of the stylesheet** — after
+`.cols`, after `.stepper`, after everything it overrides. `@media` contributes
+nothing to specificity, so a 900px block written where the old stepper query
+sat (~line 187, 115 lines above `.cols`) loses the cascade to the unconditional
+`.cols` rule and **the columns never collapse**. Every grep-level test in Step 2
+still passes: the breakpoint is there, the selector is right, the value is
+right, and only the order is wrong. This actually happened — R-033. Step 14's
+browser drive is what caught it, measuring 452px + 291px on an 820px viewport.
+
+Replace the stepper's column collapse:
 
 ```css
 .stepper {
@@ -5728,15 +5757,15 @@ pill:
 - [ ] **Step 13: Run the whole suite**
 
 Run: `uv run pytest tests/test_console.py -v`
-Expected: 30 passed. The 20 original tests must be untouched — if any of them
+Expected: 31 passed. The 20 original tests must be untouched — if any of them
 changed, markup or JavaScript was edited and this task's scope was exceeded.
 
 Run: `make verify`
-Expected: `VERIFY OK: 22/22 scenarios implemented and passing`, 217 passed, 0 skipped.
+Expected: `VERIFY OK: 22/22 scenarios implemented and passing`, 218 passed, 0 skipped.
 
 - [ ] **Step 14: Drive it in a real browser — R-022**
 
-All 30 tests above read the page as text. They pass against a page whose
+All 31 tests above read the page as text. They pass against a page whose
 JavaScript throws and against a page that renders as unstyled HTML.
 
 **`.claude/rules/testing.md` points at `/opt/pw-browsers/`, which is a
@@ -5935,8 +5964,595 @@ shows. Corrected testing.md's browser path: /opt/pw-browsers/ is a
 container path and is absent on macOS, so the rule sent local readers
 nowhere.
 
-Suite 217 passed, 0 skipped. Manifest untouched at 22/22 -- these are
+Suite 218 passed, 0 skipped. Manifest untouched at 22/22 -- these are
 ordinary tests, not new scenarios."
+```
+
+---
+
+### Task 23: `DEMO_STEP_MS` — pacing the stages — TAIL, runs before Task 21
+
+§17.1. Found by running the demo: the stubbed stages complete in milliseconds,
+so the stepper jumps 1 → 3 before anyone in the room has read it. The thing
+being demonstrated is visible progress through a long process, and the demo
+was hiding it.
+
+**Files:**
+- Modify: `python/config.py` — one field, one env read
+- Modify: `python/activities/ingest.py`, `python/activities/llm.py`,
+  `python/activities/delivery.py`
+- Modify: `.env.example` — the commented knob, in the demo-profile block
+- Test: `tests/test_demo_pacing.py`
+
+**Interfaces:**
+- Consumes: `config.settings()`
+- Produces: `config.demo_pause(multiplier)` — awaited by the four activities
+
+**Two rules from §17.1 that the code must not get wrong:**
+
+1. **`await asyncio.sleep()`, never `time.sleep()`.** Every activity here is
+   `async def` and the worker registers no `activity_executor`, so they share
+   one event loop — a blocking sleep stalls every other activity, every
+   workflow task and the pollers. `core_banking/app.py` uses `time.sleep` for
+   `CORE_SLOW_MS` and is right to; its routes are sync `def` and FastAPI runs
+   them in a threadpool. Do not copy it here.
+2. **Nothing in `python/workflows/`.** A `workflow.sleep()` would put
+   `TimerStarted`/`TimerFired` in all nine committed histories and break the
+   §16.5 replay gate. Activity duration adds no events.
+
+And **nothing on `open_account`** — its 5s `start_to_close_timeout` is §10.1's
+ambiguous-timeout beat.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_demo_pacing.py
+"""§17.1 — the stages are padded so a live audience can watch them."""
+import asyncio
+import inspect
+import time
+from pathlib import Path
+
+import pytest
+
+from python import config
+
+ROOT = Path(__file__).resolve().parents[1]
+PACED = {
+    "python/activities/ingest.py": "ingest_documents",
+    "python/activities/delivery.py": "send_documents",
+}
+
+
+def test_demo_pause_is_off_by_default(monkeypatch):
+    """Default 0 keeps `make verify` at its current runtime. A suite that
+    pays the demo's pacing is a suite people stop running."""
+    monkeypatch.delenv("DEMO_STEP_MS", raising=False)
+    assert config.settings().demo_step_ms == 0
+
+
+@pytest.mark.asyncio
+async def test_demo_pause_returns_immediately_when_unset(monkeypatch):
+    monkeypatch.delenv("DEMO_STEP_MS", raising=False)
+    started = time.perf_counter()
+    await config.demo_pause(2)
+    assert time.perf_counter() - started < 0.05
+
+
+@pytest.mark.asyncio
+async def test_demo_pause_scales_by_its_multiplier(monkeypatch):
+    monkeypatch.setenv("DEMO_STEP_MS", "40")
+    started = time.perf_counter()
+    await config.demo_pause(2)
+    elapsed = time.perf_counter() - started
+    assert 0.06 <= elapsed < 0.5, elapsed
+
+
+@pytest.mark.asyncio
+async def test_demo_pause_yields_the_event_loop(monkeypatch):
+    """The whole point. A `time.sleep` here would stall every other activity,
+    every workflow task and the worker's pollers, because the activities are
+    `async def` sharing one loop. If this pause yields, other coroutines make
+    progress while it waits."""
+    monkeypatch.setenv("DEMO_STEP_MS", "60")
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.005)
+            ticks += 1
+
+    task = asyncio.create_task(ticker())
+    await config.demo_pause(1)
+    task.cancel()
+    assert ticks > 2, f"the pause blocked the loop; only {ticks} ticks"
+
+
+def test_no_blocking_sleep_in_any_activity():
+    """§17.1. `time.sleep` in an `async def` activity blocks the shared loop.
+    Written as a source grep because the failure is silent: everything still
+    works, just serially and slowly, and no test would otherwise notice."""
+    offenders = []
+    for path in (ROOT / "python" / "activities").rglob("*.py"):
+        for n, line in enumerate(path.read_text().splitlines(), 1):
+            code = line.split("#", 1)[0]
+            if "time.sleep" in code:
+                offenders.append(f"{path.name}:{n}")
+    assert not offenders, f"blocking sleep in an async activity: {offenders}"
+
+
+def test_the_paced_activities_await_the_pause():
+    """A pause nobody calls is a knob that does nothing."""
+    missing = [f for f, _ in PACED.items()
+               if "demo_pause(" not in (ROOT / f).read_text()]
+    assert not missing, f"not paced: {missing}"
+
+
+def test_live_extraction_is_not_padded():
+    """§17.1 — a live model call already takes real seconds. Only the
+    fixture-backed path is padded."""
+    src = (ROOT / "python" / "activities" / "llm.py").read_text()
+    live = src[src.index("async def live_call_llm"):src.index("async def fixture_call_llm")]
+    assert "demo_pause(" not in live
+    assert "demo_pause(" in src[src.index("async def fixture_call_llm"):]
+
+
+def test_open_account_is_never_padded():
+    """§10.1 — its 5s start_to_close_timeout IS the headline beat. Padding it
+    either eats the margin or fires the timeout spuriously."""
+    src = (ROOT / "python" / "activities" / "core_banking.py").read_text()
+    assert "demo_pause(" not in src
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `uv run pytest tests/test_demo_pacing.py -q`
+Expected: fails on `config.settings().demo_step_ms` — `Settings` has no such
+field, and `config.demo_pause` does not exist.
+
+- [ ] **Step 3: Add the setting and the helper**
+
+`python/config.py` — one field on `Settings`, one read in `settings()`, and the
+helper beside them:
+
+```python
+# --- in the Settings dataclass, next to core_slow_ms -----------------------
+    demo_step_ms: int
+
+# --- in settings() ---------------------------------------------------------
+        demo_step_ms=int(env("DEMO_STEP_MS", "0")),
+
+
+async def demo_pause(multiplier: float = 1.0) -> None:
+    """§17.1. Pad a stubbed stage so a live audience can watch it happen.
+
+    `asyncio.sleep`, not `time.sleep`: the activities are `async def` sharing
+    one event loop, and a blocking sleep would stall every other activity, the
+    workflow tasks and the pollers. And this belongs in an activity, never in
+    a workflow -- activity duration adds no history events, where a durable
+    timer would rewrite all nine committed histories (§16.5).
+    """
+    ms = settings().demo_step_ms
+    if ms:
+        await asyncio.sleep(ms * multiplier / 1000)
+```
+
+Add `import asyncio` at the top of `config.py`.
+
+- [ ] **Step 4: Pace the four activities**
+
+Each call goes **first**, before the real work, so the activity is visibly
+Running while it "works" rather than pausing after it has already finished.
+
+| File | Activity | Call |
+|---|---|---|
+| `activities/ingest.py` | `ingest_documents` | `await config.demo_pause(2)` |
+| `activities/llm.py` | `fixture_call_llm` **only** | `await config.demo_pause(1)` |
+| `activities/delivery.py` | `send_documents` | `await config.demo_pause(1)` |
+| `activities/delivery.py` | `notify` | `await config.demo_pause(0.5)` |
+
+`live_call_llm` and `open_account` get nothing.
+
+- [ ] **Step 5: Run the pacing tests**
+
+Run: `uv run pytest tests/test_demo_pacing.py -q`
+Expected: 8 passed.
+
+- [ ] **Step 6: Confirm the suite did not slow down**
+
+Run: `make verify`
+Expected: `VERIFY OK: 22/22`, and a runtime within a second or two of the
+previous run. `DEMO_STEP_MS` is unset there, so every pause returns immediately.
+
+- [ ] **Step 7: Document the knob**
+
+`.env.example`, in the demo-profile block beside `CORE_SLOW_MS`:
+
+```
+# Pad the stubbed stages so a live audience can watch the stepper advance
+# (§17.1). 0 disables it, which is what the test suite runs with.
+# DEMO_STEP_MS=1500
+```
+
+- [ ] **Step 8: Watch it in the live stack**
+
+```bash
+DEMO_STEP_MS=1500 make demo
+```
+
+Submit, and watch the stepper move 1 → 2 → 3 at a readable pace. Confirm in the
+Temporal UI that `ingest_documents` sits in **Running** for ~3s with its
+summary showing — that is the pacing doing its job, and it is the frame §12
+wants the audience looking at. Then `make down`.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add python/config.py python/activities/ tests/test_demo_pacing.py .env.example
+git commit -m "feat: DEMO_STEP_MS paces the stubbed stages — §17.1"
+```
+
+---
+
+### Task 24: `already_onboarded` — the duplicate that is not the beat — TAIL, runs before Task 21
+
+§10.1.1, §5.6. Found by running the demo. The slow-first-call toggle appeared
+to do nothing, because the ledger already held `onboarding-acme-corp` from an
+earlier run and core banking returns `duplicate` **before** it reaches the
+delay. Chasing that surfaced the real defect underneath: `duplicate` means two
+different things and the workflow treats them identically.
+
+| `core_attempt` | Meaning | Today | Required |
+|---|---|---|---|
+| ≥ 2 | Our own call created it; the reply was lost | Proceeds. Correct. | Proceed, and **say so** |
+| 1 | A previous onboarding owns the account | Proceeds as if it opened one | Terminate `already_onboarded`, skip steps 5–6 |
+
+Sending a welcome pack to a client about an account they have held for months
+is wrong however it is displayed. It is **not** a workflow failure (§10.3) —
+it is a terminal business status.
+
+**Step 7 still runs, and should.** `_finish` notifies on every terminal status,
+and for anything but `completed` the recipients are the onboarding specialist
+and supervisor, **never the end client** (§5.5.1). So the client hears nothing
+and the two people who need to know get a record — which is the whole
+behaviour worth asserting.
+
+**This is the only scenario added after Task 1.** The manifest goes 22 → 23 and
+`make verify` prints `23/23`. Log the addition as a ruling, per
+`.claude/rules/testing.md`.
+
+**Replay is safe, and this was checked rather than assumed.** `core_duplicate`
+and `core_preexisting` live on `OnboardingStatus`, which is a *query* return
+type — queries are never recorded in history (§13). Adding `already_onboarded`
+widens two `Literal`s, and the committed histories recorded
+`{"status":"completed",…}`, which stays a valid member. No history takes the
+new branch, so the new `if` evaluates false during replay and emits no
+commands.
+
+**Files:**
+- Modify: `python/models/onboarding.py` — both `Literal`s, two new status fields
+- Modify: `python/workflows/onboarding.py` — the branch, and the two flags
+- Modify: `python/workflows/tracker.py` — the terminal-stage set
+- Modify: `web/static/index.html` — `STEP`, `TERMINAL_BAD`, the label, the pill
+  class, and the review-panel copy
+- Modify: `make/common.mk` — `22/22` → `23/23`
+- Test: `tests/test_manifest.py` (+`T-WF-10`), `tests/test_core_submission.py`
+  (the scenario body), `tests/test_console.py` (stage coverage picks it up)
+- Modify: `CONTRACT.md`, `.claude/rules/testing.md`, `CLAUDE.md`,
+  `docs/DEVELOPMENT-PROCESS.md` — the count
+
+- [ ] **Step 1: Write the failing scenario**
+
+`T-WF-10` in `tests/test_manifest.py`, delegating to a body in
+`tests/test_core_submission.py` beside `T-WF-07`'s. The body pre-seeds the
+`open_account` stub returns `duplicate` on its FIRST call, and the body asserts:
+the terminal status is `already_onboarded`; `open_account` was called exactly
+once (no retry — there is nothing ambiguous to retry); the single notification
+carries `outcome: already_onboarded` with **no** `packet_uri`; and its
+recipients are the specialist and supervisor with `end_client` absent. That last
+assertion is the compliance property — the customer is never told.
+
+Reuse `T-WF-07`'s fixtures and its ledger helper — do not build a second
+harness. `T-WF-07` is the attempt-2 case and must keep passing unchanged; the
+two together are what prove the distinction.
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `uv run pytest tests/test_manifest.py -k T_WF_10 -v`
+Expected: fails because `already_onboarded` is not a valid `Literal` member.
+
+- [ ] **Step 3: Widen the models**
+
+`python/models/onboarding.py`: add `"already_onboarded"` to
+`OnboardingStatus.stage` and `OnboardingResult.status`, and add
+`core_duplicate: bool = False` / `core_preexisting: bool = False` to
+`OnboardingStatus`. Defaults matter — a field without one breaks every existing
+construction.
+
+- [ ] **Step 4: Branch the workflow**
+
+In `python/workflows/onboarding.py`, where `ack.status == "duplicate"` is
+currently only logged:
+
+```python
+self._core_request_id = ack.request_id
+if ack.status == "duplicate":
+    self._core_duplicate = True
+    if self._core_attempt == 1:
+        # §10.1.1. Nothing in THIS run created the account -- a previous
+        # onboarding for this client did. Delivering a welcome pack and
+        # notifying the client would be wrong, so stop here. A terminal
+        # business status, never a failed workflow (§10.3).
+        self._core_preexisting = True
+        return await self._finish(
+            req, "already_onboarded", None,
+            f"account {ack.request_id} already existed for this client; "
+            f"no second account was created and nothing was sent")
+    # Attempt >= 2: our own first call created it and the answer was lost.
+    # This is the beat working (§10.1).
+    workflow.logger.info(
+        "core banking returned duplicate for %s -- the idempotency key "
+        "prevented a second account", ack.request_id)
+```
+
+Initialise both flags in `__init__` and return them from the `status` query.
+
+- [ ] **Step 5: Place the new stage**
+
+`python/workflows/tracker.py` — add `already_onboarded` to the terminal set,
+crossing the step it stopped at rather than ticking all seven. R-021 fixed
+exactly this for `manual_intervention` and `rejected_by_core`; the new stage
+stops at step 4.
+
+`web/static/index.html` — `STEP` (position 4, beside `rejected_by_core`'s 3),
+`TERMINAL_BAD`, a `STAGE_LABEL` of "Client already onboarded", and a pill class.
+`is-alert` overstates it — nothing failed — so use `is-waiting`'s amber or add a
+neutral tone. Then say which duplicate happened, from `core_preexisting`.
+
+- [ ] **Step 6: Run the suite**
+
+Run: `uv run pytest -q`
+Expected: `T-WF-10` passes, `T-WF-07` still passes, and
+`test_every_status_stage_has_a_stepper_position` picks up the new stage without
+edits — it iterates the stage list.
+
+- [ ] **Step 7: Move the definition of done to 23**
+
+`make/common.mk`'s echo, `tests/test_manifest.py`'s docstring,
+`.claude/rules/testing.md`, `CLAUDE.md` and `docs/DEVELOPMENT-PROCESS.md`.
+Then `make verify` — expected `VERIFY OK: 23/23`.
+
+- [ ] **Step 8: Prove the replay gate still holds**
+
+Run: `uv run pytest tests/test_replay.py -v`
+Expected: all four pass **without re-capturing anything.** If a replay test
+goes red, the branch changed a command path it should not have — fix the code,
+never the history.
+
+- [ ] **Step 9: Watch both cases in the live stack**
+
+```bash
+make demo                 # ledger cleared: attempt 2 duplicate, the beat
+# then, without demo-reset, submit again for the same client:
+make up                   # ledger retained: attempt 1 duplicate
+```
+
+The first run must reach `complete` with the console showing the retry. The
+second must stop at `already_onboarded` with nothing in `outbox/`.
+
+- [ ] **Step 10: Log the ruling and commit**
+
+The scenario addition needs a `RULINGS.md` entry — the manifest is the
+definition of done and it just changed.
+
+```bash
+git add python/ web/static/index.html tests/ make/common.mk CONTRACT.md \
+        .claude/rules/testing.md CLAUDE.md docs/
+git commit -m "feat: already_onboarded — Task 24, §10.1.1"
+```
+
+---
+
+### Task 25: the core retry goes back to the activity's RetryPolicy — TAIL
+
+§10.1, §10.2, §10.1.1, §13. **Supersedes R-015.** The workflow-level retry loop
+was built so the console could show `core_attempt` and `last_error` live. It
+worked, and it cost more than it bought: reading §10.2 and then finding
+`maximum_attempts=1` at the call site reads as *retry disabled*. R-015 predicted
+that confusion in writing and it happened anyway, to the person who commissioned
+it. The comment pointing at R-015 was not enough.
+
+**What changes.** One `execute_activity` with §10.2's policy as written —
+initial 1s, backoff 2.0, max interval 10s, unlimited attempts. No `while True`,
+no `workflow.sleep` backoff, no `_core_attempt` increment.
+
+**What is given up, deliberately.** The console can no longer show the retry
+*while it happens*: the workflow is blocked in one call and knows nothing until
+it returns. An in-flight activity retry cannot be surfaced into a query by any
+means. The retry is narrated in the **Temporal UI**, which shows a pending
+activity's attempt and last failure natively — the better place for it in a
+Temporal demo. The console reports the attempt count afterwards.
+
+**The trap this task must not fall into.** §10.1.1 distinguishes a duplicate on
+attempt 1 (a previous onboarding owns the account → `already_onboarded`) from a
+duplicate on attempt ≥ 2 (our own call landed, the answer was lost → proceed).
+That test currently reads `self._core_attempt`, which stops existing here.
+**Without a replacement, every successful retry reads as attempt 1 and the
+workflow stops as `already_onboarded` instead of completing — the happy path
+breaks and T-WF-07 fails.** The replacement is `OpenAccountAck.attempt`,
+reported by the activity from `activity.info().attempt`.
+
+That is **not** §10.1's trap. The trap is deriving the *idempotency key* from
+the attempt number. Reading it to report which try answered changes no
+behaviour and is the only way the two cases stay distinguishable.
+
+**Files:**
+- Modify: `python/models/core_banking.py` — `OpenAccountAck.attempt: int = 1`
+- Modify: `python/activities/core_banking.py` — report `activity.info().attempt`
+- Modify: `python/workflows/onboarding.py` — delete the loop; keep the
+  `already_onboarded` branch, keyed on the ack
+- Modify: `web/static/index.html` — `Core attempt` becomes an after-the-fact
+  count; drop the live `last_error` promise on `submitting_to_core`
+- Test: `tests/test_core_submission.py` — T-WF-07 and T-WF-10 bodies, and
+  `test_the_timeout_is_visible_in_status_while_it_retries` **goes**, replaced by
+  one that asserts the attempt count arrives on the ack
+
+- [ ] **Step 1: Rewrite the two scenario bodies first, and watch them fail**
+
+T-WF-07 currently asserts `status["core_attempt"] >= 2` mid-flight. With the
+policy owning the retry it must assert on the *result*: `open_account` was
+invoked twice by the SDK, the key was identical both times, and the ack that
+came back carries `attempt == 2`.
+
+T-WF-10's stub must now return `attempt=1` with `status="duplicate"`, and
+T-WF-07's must return `attempt=2`. A stub that omits `attempt` defaults to 1,
+which would make every retry look pre-existing — the exact failure this task
+has to avoid, so assert it explicitly rather than relying on the default.
+
+Delete `test_the_timeout_is_visible_in_status_while_it_retries`. It pins
+behaviour this task deliberately removes; leaving it red or weakening it in
+place would both be worse than removing it and saying so in the commit.
+
+Run: `uv run pytest tests/test_manifest.py -k "T_WF_07 or T_WF_10" -q`
+
+**This prediction was wrong when the task ran, and the reason is worth
+knowing.** Both *passed*. Pydantic's `extra` defaults to `"ignore"`, so a stub
+constructing `OpenAccountAck(..., attempt=2)` against a model without the field
+has that kwarg **silently dropped** — and `core_attempt == 2` was then carried
+by the old loop's counter, not by the ack. A test that cannot fail is not a
+test (R-037).
+
+So do not trust this step to discriminate. Add the field, then prove the test
+earns its keep by removing it again and watching the test go red — and do the
+same for the activity's line, separately, because the workflow tests use a stub
+and cannot see the real activity at all.
+
+- [ ] **Step 2: Add the field**
+
+```python
+class OpenAccountAck(BaseModel):
+    request_id: str
+    status: Literal["accepted", "duplicate"]
+    attempt: int = 1        # activity.info().attempt — which try answered
+```
+
+Default 1 so every existing construction keeps working, including the nine
+committed histories, which recorded acks without it.
+
+- [ ] **Step 3: Report it from the activity**
+
+In `python/activities/core_banking.py`, on the success path only:
+
+```python
+    return OpenAccountAck(request_id=body["request_id"],
+                          status=body["status"],
+                          attempt=activity.info().attempt)
+```
+
+`activity.info().attempt` is 1-based and counts this activity's own retries.
+Reading it is safe; deriving the idempotency key from it is §10.1's trap and
+`tests/test_determinism_guard.py` greps for that expression in
+`open_account` — so do not name it in a comment there either
+(`.claude/rules/testing.md` has bitten twice on exactly that).
+
+- [ ] **Step 4: Delete the loop**
+
+Replace the whole `while True` with one call carrying §10.2's policy:
+
+```python
+        self._stage = "submitting_to_core"
+        self._track(req)
+        try:
+            ack: OpenAccountAck = await workflow.execute_activity(
+                "open_account",
+                OpenAccountRequest(
+                    # Stable across every retry. NEVER a retry counter -- that
+                    # is the trap in §10.1 and it produces exactly the
+                    # duplicate account this design prevents.
+                    idempotency_key=workflow.info().workflow_id,
+                    application=self._application),
+                result_type=OpenAccountAck,
+                start_to_close_timeout=timedelta(seconds=5),
+                # §10.2 as written. The retry is the platform's; the Temporal
+                # UI shows the attempt and the last failure while it runs,
+                # which is where this beat is narrated (§13, R-037).
+                retry_policy=RetryPolicy(
+                    initial_interval=timedelta(seconds=1),
+                    backoff_coefficient=2.0,
+                    maximum_interval=timedelta(seconds=10)),
+                summary="Submit account request to core banking")
+        except ActivityError as e:
+            cause = e.cause
+            if isinstance(cause, ApplicationError) and cause.non_retryable:
+                self._last_error = _failure_message(e)
+                return await self._finish(req, "rejected_by_core", None,
+                                          self._last_error)
+            raise
+
+        self._core_attempt = ack.attempt
+        self._core_request_id = ack.request_id
+        if ack.status == "duplicate":
+            self._core_duplicate = True
+            if ack.attempt == 1:
+                self._core_preexisting = True
+                return await self._finish(
+                    req, "already_onboarded", None,
+                    f"account {ack.request_id} already exists for this client "
+                    f"from an earlier onboarding; nothing was created and no "
+                    f"documents were sent")
+            workflow.logger.info(
+                "core banking returned duplicate on attempt %d -- the "
+                "idempotency key prevented a second account", ack.attempt)
+```
+
+`maximum_attempts` is left unset, which is unlimited — §10.2 requires that, and
+a core that answers in an hour is the normal case. The bare `raise` on a
+retryable exhaustion cannot be reached while attempts are unlimited; it is
+there so a future cap does not silently swallow the failure.
+
+- [ ] **Step 5: Run the two scenarios, then the whole suite**
+
+Run: `uv run pytest tests/test_manifest.py -k "T_WF_07 or T_WF_10" -q`
+Expected: 2 passed.
+
+Run: `make verify`
+Expected: `VERIFY OK: 23/23`, 233 passed — one fewer than before, because
+`test_the_timeout_is_visible_in_status_while_it_retries` is gone.
+
+- [ ] **Step 6: Prove the replay gate still holds**
+
+Run: `uv run pytest tests/test_manifest.py -k T_REPLAY -v`
+
+This is the step to slow down on. Deleting the loop **removes commands from
+the workflow's command sequence** — the timer that backed off between attempts,
+and the second activity scheduling. `histories/timeout-retry.json` recorded a
+run that had them. If that replay goes red it is telling the truth: the code no
+longer produces the history it produced when captured.
+
+**Then re-capture is correct, and this is the one case where it is.** The gate
+exists to catch an *unintended* command change; this task's whole purpose is an
+intended one. Re-capture with `FIXTURE_MODE=1 make up && make histories`, read
+the diff, and say in the commit which histories changed and why.
+
+- [ ] **Step 7: Update the console**
+
+`Core attempt` on `submitting_to_core` has nothing to read while the call is in
+flight — `core_attempt` is 0 until the ack lands. Drop it from that stage's
+facts and point at the Temporal UI instead; keep it on `complete`, where it
+now means "attempts used". Remove the live `last_error` line from
+`submitting_to_core`; a retryable failure never reaches the workflow any more.
+
+- [ ] **Step 8: Log the ruling and commit**
+
+R-037 supersedes R-015. Say what R-015 got right — the visibility was real and
+the test proved it — and why it lost anyway: it optimised for the console at
+the cost of the call site, and the call site is what an implementer reads
+first. Note that R-015's own predicted confusion is what killed it.
+
+```bash
+git add python/ web/static/index.html tests/ histories/ docs/
+git commit -m "refactor: the core retry is the activity's RetryPolicy again — R-037"
 ```
 
 ---
@@ -5956,7 +6572,7 @@ ordinary tests, not new scenarios."
 - [ ] **Step 1: Run the definition of done**
 
 Run: `make verify`
-Expected: `VERIFY OK: 22/22 scenarios implemented and passing`
+Expected: `VERIFY OK: 23/23 scenarios implemented and passing`
 
 If any scenario is still skipped, that is the remaining work — do not proceed.
 
@@ -5966,7 +6582,7 @@ If any scenario is still skipped, that is the remaining work — do not proceed.
 make demo
 ```
 
-Then in the browser at `http://localhost:8000`: Submit → watch extraction → the gap panel appears with `beneficial_owners[1].dob` → try Approve without filling it (expect the validator's refusal) → fill it, tick attestation, Approve → watch `submitting_to_core` show `attempt 2, last error: timeout` → Return client ID → complete. Confirm `curl -s localhost:8001/ledger` shows **one** account.
+Then in the browser at `http://localhost:8000`: Submit → watch extraction → the gap panel appears with `beneficial_owners[1].dob` → try Approve without filling it (expect the validator's refusal) → fill it, tick attestation, Approve → watch `submitting_to_core` show `attempt 2, last error: timeout` (needs a cleared ledger -- `make demo` chains `demo-reset`; see R-036) → Return client ID → complete. Confirm `curl -s localhost:8001/ledger` shows **one** account.
 
 Then `make restart-worker` during the `awaiting_review` wait and confirm the workflow resumes.
 
@@ -5988,7 +6604,7 @@ Task 4 built the diagrams from the spec before any code existed. Re-read `docs/D
 git add README.md docs/DESIGN-DIAGRAMS.md TALK_TRACK.md
 git commit -m "docs: README, and reconcile the design artifact with the build
 
-make verify reports 22/22. Walked the demo end to end: the validator
+make verify reports 23/23. Walked the demo end to end: the validator
 refuses an approve with the gap unfilled, the core call times out and
 retries with the same key, and the ledger holds exactly one account.
 

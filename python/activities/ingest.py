@@ -51,6 +51,9 @@ def _documents_dir() -> Path:
 
 @activity.defn(name="ingest_documents")
 async def ingest_documents(req: IngestRequest) -> DocumentManifest:
+    # §17.1. Five documents' worth of pacing, so step 1 is legible on a call.
+    # First, not last, so the activity shows Running while it "works".
+    await config.demo_pause(2)
     source = _documents_dir() / req.client_key
     if not source.is_dir():
         # §10.2, §19.7: a document that is not there will not appear because we

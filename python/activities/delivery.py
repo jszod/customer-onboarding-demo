@@ -30,6 +30,7 @@ async def send_documents(req: SendDocumentsRequest) -> SendDocumentsResult:
     The path is derived from `client_key` + `client_id`, so the retry Task 14
     may trigger overwrites the same file instead of producing a second packet.
     """
+    await config.demo_pause(1)                                       # §17.1
     outbox = config.settings().outbox_dir
     rel = f"{req.client_key}/{req.client_id}.txt"
     path = outbox / rel
@@ -60,6 +61,7 @@ async def notify(req: NotifyRequest) -> NotifyResult:
     nothing; the §9.2 reminders, which differ only in `detail` (the attempt and
     how long the review has been pending), stay distinct.
     """
+    await config.demo_pause(0.5)                                     # §17.1
     record = req.model_dump(mode="json")
     await asyncio.to_thread(_append_notification, record,
                             [req.client_key, req.outcome,

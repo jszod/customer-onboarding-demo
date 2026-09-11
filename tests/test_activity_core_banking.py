@@ -4,9 +4,16 @@ The whole demo rests on one property: the idempotency key handed to core
 banking is the PARENT WORKFLOW ID, arriving on the request and identical on
 every retry. If it varied per retry the second call would open a second
 account and the headline claim would be false, so this module asserts the
-property three ways — behaviourally (a repeat call comes back `duplicate`
-carrying the ORIGINAL request id), structurally (the ledger holds exactly one
-row), and by reading the activity's own source for the trap §10.1 names.
+property three ways — a repeat call comes back `duplicate` carrying the
+ORIGINAL request id, the ledger holds exactly one row, and the key on the wire
+is byte-identical across attempt numbers.
+
+That third one used to read the activity's source for the trap §10.1 names.
+It was rewritten when §10.1.1 gave the activity a legitimate reason to read
+`activity.info().attempt` — to report which try answered — and a grep banning
+the word could not tell that apart from deriving the key from it. R-037 has the
+reasoning; `.claude/rules/testing.md` has the general warning, which this is
+now the third instance of.
 
 The service runs in-process over an ASGI transport, against a ledger in a
 tmp_path — never the repo's `core_banking/ledger.db`.
@@ -14,6 +21,8 @@ tmp_path — never the repo's `core_banking/ledger.db`.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import json
 import os
 import re
 import tempfile
@@ -218,9 +227,77 @@ def test_the_http_client_outlives_the_activity_timeout():
 
 
 def test_key_is_never_derived_from_the_attempt_number():
-    """§10.1's stated trap. Deriving from the SDK's per-retry counter defeats
-    the whole mechanism, so the word does not appear in the module at all."""
-    source = ACTIVITY_SOURCE.read_text()
-    assert "info().attempt" not in source
-    assert "attempt" not in source.lower()
-    assert "attempt" not in source.split("idempotency_key")[1][:200]
+    """§10.1's stated trap — asserted on the wire, not on the source text.
+
+    This was three greps: `"info().attempt" not in source`, `"attempt" not in
+    source.lower()`, and no "attempt" within 200 characters of
+    "idempotency_key". All three broke the moment §10.1.1 gave the activity a
+    legitimate reason to read the attempt number and report it on the ack, and
+    a blanket ban on the word was never the property anyway — it was a proxy
+    for it, and `.claude/rules/testing.md` warns that a source grep makes the
+    file's own prose part of the test. That has now happened three times.
+
+    The real property is behavioural and cannot be fooled by a comment: drive
+    the activity on different attempt numbers and the key on the wire must be
+    byte-identical, and must be the one the workflow passed in. A key built
+    from the attempt fails this immediately; a key mentioned in a log line
+    does not.
+    """
+    sent: list[str] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content)["idempotency_key"])
+        return httpx.Response(200, json={"request_id": "REQ-K",
+                                         "status": "accepted"})
+
+    real_client = httpx.AsyncClient
+
+    def client_factory(*_a, **_k):
+        return real_client(transport=httpx.MockTransport(capture),
+                           base_url="http://core")
+
+    for attempt in (1, 2, 9):
+        env = ActivityEnvironment()
+        env.info = dataclasses.replace(env.info, attempt=attempt)
+        with mock.patch("python.activities.core_banking.httpx.AsyncClient",
+                        client_factory):
+            asyncio.run(env.run(open_account, _request()))
+
+    assert len(set(sent)) == 1, (
+        f"the idempotency key changed across attempts: {sent} — §10.1's trap, "
+        f"and it opens one account per retry")
+    assert sent[0] == KEY, f"the key was rewritten: {sent[0]!r} != {KEY!r}"
+
+
+def test_the_ack_reports_the_activity_attempt_number():
+    """§10.1.1. The REAL activity must stamp `activity.info().attempt` onto the
+    ack, and this is the only test that checks it.
+
+    T-WF-07 and T-WF-10 both swap `open_account` for a stub, and the stubs set
+    `attempt` themselves — so deleting this line from the real activity leaves
+    the entire workflow suite green while breaking every live retry: the retry
+    would report attempt 1, the workflow would read that as a pre-existing
+    account, and the happy path would stop as `already_onboarded` instead of
+    completing. Stubs prove our side of a contract, not the contract (R-024).
+
+    `ActivityEnvironment` lets the attempt number be set, which is what makes
+    this assertable without actually forcing a retry.
+    """
+    real_client = httpx.AsyncClient
+
+    def client_factory(*_a, **_k):
+        return real_client(
+            transport=httpx.MockTransport(lambda _r: httpx.Response(
+                200, json={"request_id": "REQ-9", "status": "duplicate"})),
+            base_url="http://core")
+
+    for attempt in (1, 2, 7):
+        env = ActivityEnvironment()
+        env.info = dataclasses.replace(env.info, attempt=attempt)
+        with mock.patch("python.activities.core_banking.httpx.AsyncClient",
+                        client_factory):
+            ack = asyncio.run(env.run(open_account, _request()))
+        assert ack.attempt == attempt, (
+            f"the ack reported attempt {ack.attempt} on try {attempt}; a "
+            f"retry that reports 1 is read as a pre-existing account (§10.1.1)")
+        assert ack.status == "duplicate"

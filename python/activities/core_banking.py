@@ -65,7 +65,14 @@ async def open_account(req: OpenAccountRequest) -> OpenAccountAck:
                                type="ServerError")
     resp.raise_for_status()
 
-    ack = OpenAccountAck.model_validate(resp.json())
-    activity.logger.info("open_account key=%s status=%s request_id=%s",
-                         req.idempotency_key, ack.status, ack.request_id)
+    # §10.1.1. The service does not know how many times we have asked, so the
+    # count is stamped here. The workflow cannot count for itself: §10.2's
+    # policy owns the retry, so it sees one call and one result -- and it needs
+    # this to tell a duplicate caused by our own lost reply from a duplicate
+    # caused by an onboarding that ran months ago.
+    ack = OpenAccountAck.model_validate(
+        resp.json() | {"attempt": activity.info().attempt})
+    activity.logger.info("open_account key=%s status=%s request_id=%s try=%d",
+                         req.idempotency_key, ack.status, ack.request_id,
+                         ack.attempt)
     return ack

@@ -112,9 +112,22 @@ sequenceDiagram
    every attempt. That is what lets the bank's system recognise the second
    request as the same request.
 4. **The bank's system answers "duplicate" and returns the original account.**
-   The process carries on with the right account number and no human ever finds
-   out anything went wrong.
-5. **The client ID arrives separately, whenever it arrives.** The process waits
+   The process carries on with the right account number, and the only trace is
+   a second attempt in the record — which is the point: the incident happened
+   and nobody had to handle it.
+5. **The retry is the platform's, and it leaves a record.** Nobody writes a
+   loop: the call is declared with a backoff policy and the platform re-runs
+   it. The evidence is not lost by being automatic — while it is in flight the
+   pending call shows its attempt number and the last failure, and afterwards
+   the recorded history keeps both on the one call that eventually answered.
+   That is the difference between a retry and a retry you can audit.
+6. **"Duplicate" on the *first* attempt means something else entirely.** Then
+   no call of ours created the account — a previous onboarding did. The
+   process stops there rather than carrying on: it opens nothing, sends the
+   client nothing, and tells the specialist and their supervisor instead.
+   Same word from the bank, two situations, and conflating them would mean
+   welcoming a customer to an account they have held for months.
+7. **The client ID arrives separately, whenever it arrives.** The process waits
    without holding anything open — which is why a system that answers in
    minutes and a system that answers in days need no different handling.
 

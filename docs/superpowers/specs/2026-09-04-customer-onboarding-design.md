@@ -368,6 +368,7 @@ class OpenAccountRequest(BaseModel):
 class OpenAccountAck(BaseModel):
     request_id: str
     status: Literal["accepted", "duplicate"]
+    attempt: int = 1        # activity.info().attempt — which try answered (§10.1.1)
 
 class ClientIdAssignment(BaseModel):
     client_id: str
@@ -424,7 +425,8 @@ class OnboardingStatus(BaseModel):
     stage: Literal["ingesting", "extracting", "awaiting_review",
                    "submitting_to_core", "awaiting_client_id",
                    "sending_documents", "notifying", "complete",
-                   "manual_intervention", "rejected_by_core"]
+                   "manual_intervention", "rejected_by_core",
+                   "already_onboarded"]
     attempt: int
     application: ApplicationFields | None
     gaps: list[FieldGap]
@@ -434,13 +436,22 @@ class OnboardingStatus(BaseModel):
     core_request_id: str | None
     client_id: str | None
     extraction_iterations: int
+    core_duplicate: bool = False      # core banking answered "duplicate"
+    core_preexisting: bool = False    # ...on attempt 1 (§10.1.1)
 
 class OnboardingResult(BaseModel):
-    status: Literal["completed", "manual_intervention", "rejected_by_core"]
+    status: Literal["completed", "manual_intervention", "rejected_by_core",
+                    "already_onboarded"]
     client_id: str | None
     attempts: int
     detail: str
 ```
+
+`core_duplicate` and `core_preexisting` are **query-only**: queries are never
+recorded in history (§13), so they are free against the §16.5 replay gate.
+`already_onboarded` widens two `Literal`s, which is also replay-safe — the
+`"completed"` already in the committed histories stays a valid member. See
+§10.1.1 for why the two duplicate cases must not be conflated.
 
 ## 6. The wire surface
 
@@ -732,6 +743,78 @@ prevent.
 Slow-first-call is the **default** behaviour so the beat happens on every run;
 a console toggle disables it for a clean pass.
 
+**The retry is §10.2's activity `RetryPolicy`, and nothing else.** No
+workflow-level loop. An earlier build moved the retry into a `while True` in
+the workflow so the console could show the attempt count live; that was
+abandoned as more confusing than the visibility was worth — an implementer read
+§10.2, found `maximum_attempts=1` at the call site, and reasonably concluded
+retry had been disabled. See R-037, which supersedes R-015.
+
+The consequence is deliberate and worth stating: **the retry is watched in the
+Temporal UI, not in the console.** A pending activity's attempt number and last
+failure are something the platform already shows, natively, without being
+asked — which for a Temporal demo is the better place for them anyway. The
+console reports how many attempts it *took*, after the fact, from
+`OpenAccountAck.attempt`.
+
+**The beat fires once per ledger.** The idempotency key is the workflow ID,
+which §4.1 derives from the client key rather than a UUID — so it is the *same
+key on every run*. Core banking answers `duplicate` before it reaches the
+delay, which is correct (a fast duplicate is the proof the key worked) but
+means the slow call cannot fire a second time for the same client until the
+ledger is cleared. `make demo` chains `demo-reset`; `make up` alone does not.
+§14 says so in the runbook, because the toggle otherwise looks broken.
+
+### 10.1.1 `duplicate` means two different things
+
+`status: "duplicate"` is returned in two situations that the workflow can
+distinguish and must not conflate.
+
+| `ack.attempt` | What happened | What it means |
+|--------------|---------------|---------------|
+| **≥ 2** | Our own earlier call created the account; the answer was lost | §10.1's beat, working. Proceed. |
+| **1** | A **previous onboarding** for this client already owns the account | Nothing in this run created anything |
+
+**The attempt number comes back on the ack**, from `activity.info().attempt`
+inside the activity. With the retry owned by the activity's `RetryPolicy` the
+workflow cannot count attempts itself — it sees one call and one result — so
+the activity reports which attempt answered.
+
+This is **not** §10.1's trap. That trap is deriving the *idempotency key* from
+`activity.info().attempt`, which breaks the key's stability and produces the
+duplicate account the design exists to prevent. Reading the same value to
+*report* which attempt succeeded changes no behaviour and is the only way the
+two duplicate cases can be told apart once the loop is gone.
+
+The second case is reachable in business terms, not just as a demo artifact: a
+workflow ID of `onboarding-<client-key>` stops two *open* onboardings for one
+client, but nothing stops a second one after the first completes.
+
+**Attempting the call is still correct in both cases.** There is no pre-check
+and there should not be one — asking idempotently *is* the safe way to find
+out whether an account exists, and a pre-check would introduce the
+read-then-write race the idempotency key exists to remove.
+
+**A first-attempt duplicate terminates the workflow as `already_onboarded`.**
+The client-ID wait (step 5) and the welcome pack (step 6) are skipped: sending
+a pack and telling a client about an account they have held for months is wrong
+however it is displayed. It is **not** a workflow failure (§10.3) — it is a
+terminal business status.
+
+Step 7 still runs, and that is the point rather than an exception. `_finish`
+notifies on every terminal status, and for anything other than `completed` the
+recipients are the **onboarding specialist and supervisor, never the end
+client** (§5.5.1). So the outcome is exactly what a bank wants from a repeat
+onboarding attempt on an existing client: nothing sent to the customer, and a
+record in front of the two people who need to see it.
+
+`OnboardingStatus` carries `core_duplicate` and `core_preexisting` so the
+console can state which of the two happened. Both are query-only fields:
+queries are never recorded in history (§13), so they cost nothing against the
+§16.5 replay gate. Adding `already_onboarded` to the two `Literal`s is
+likewise replay-safe — widening a union does not invalidate the `"completed"`
+already recorded in the committed histories.
+
 ### 10.2 Retry policies
 
 | Activity | `start_to_close` | Retry | Non-retryable |
@@ -847,9 +930,22 @@ rendering choice, not a contract change. A document-centric view (fields
 grouped by source document) was rejected — its provenance value is already
 carried by `FieldGap.documents_searched`, without building a document viewer.
 
-`submitting_to_core` is a **visible stage** showing `core_attempt` and
-`last_error`, so the headline retry is legible without switching to the
-Temporal UI.
+`submitting_to_core` is a **visible stage**, and once the call resolves the
+console reports `core_attempt` — how many tries it took, read off
+`OpenAccountAck.attempt`.
+
+**It does not show the retry while the retry is in flight, and that is a
+deliberate trade.** The retry belongs to the activity's `RetryPolicy` (§10.2),
+and an in-flight activity retry cannot be surfaced into a workflow query by any
+means — the workflow is blocked in one `execute_activity` call and knows
+nothing until it returns. An earlier build did drive the retry from a workflow
+loop to get exactly this, and the confusion it caused at the call site
+outweighed the gain (R-037, superseding R-015).
+
+**So the retry is narrated in the Temporal UI**, which shows a pending
+activity's attempt number and last failure without being asked. For a Temporal
+demo that is the stronger move: the platform is doing the work, so the platform
+is where you watch it happen. §14's runbook has the two tabs open regardless.
 
 **Refresh:** poll the `status` query every 2s. Queries are not recorded in
 history, so this is free. The `workflow_streams` contrib module is the
@@ -1248,11 +1344,19 @@ and its output is reviewed in the diff.
 
 ### 16.8 The scenario manifest — the definition of done
 
-**The twenty-two scenarios below are exhaustive. The build is complete when all
-twenty-two pass and none are skipped.** This exists so completeness is a
+**The twenty-three scenarios below are exhaustive. The build is complete when
+all twenty-three pass and none are skipped.** This exists so completeness is a
 *command*, not a judgement an agent makes about its own work. Prose an agent
 must re-read and self-assess against is how a run ends with six tests written
 and a confident report of success.
+
+**`T-WF-10` was added after the build began**, when running the demo exposed
+§10.1.1 — that `duplicate` means two different things and the workflow was
+conflating them. It is the only addition, and the one the rule in
+`.claude/rules/testing.md` anticipates: *"Adding a scenario is allowed: add a
+row with a new ID and log the addition as a ruling. Silently dropping one is
+not."* The original set was twenty-two, which is what Task 1 stubbed and what
+every task before Task 22 was measured against.
 
 **Task 1 writes all twenty-two as `@pytest.mark.skip` stubs**, named by ID,
 with the scenario text as the docstring. Every subsequent turn can then run
@@ -1272,6 +1376,7 @@ with the scenario text as the docstring. Every subsequent turn can then run
 | `T-WF-07` | Timeout then duplicate → workflow proceeds, ledger holds exactly one account | 16.2 |
 | `T-WF-08` | Core rejects the application → `rejected_by_core` | 16.2 |
 | `T-WF-09` | `ChildWorkflowError` counts as a spent attempt | 16.2 |
+| `T-WF-10` | Duplicate on the **first** core attempt → `already_onboarded`, delivery skipped | 16.2 |
 | `T-TIME-01` | Remind fires at `SLA_REMIND`, escalate at `SLA_ESCALATE`, workflow still waiting | 16.3 |
 | `T-TIME-02` | **Far past both SLAs, stage is still `awaiting_review`** — never auto-approves | 16.3 |
 | `T-TIME-03` | `CLIENT_ID_SLA` fires and does not abandon the workflow | 16.3 |
@@ -1319,6 +1424,7 @@ feature.** Everything downstream gates on it.
 | `SLA_ESCALATE` | `7d` | `60s` |
 | `CLIENT_ID_SLA` | `1d` | `45s` |
 | `CORE_SLOW_MS` | `10000` | — |
+| `DEMO_STEP_MS` | `0` | `1500` |
 | `DOCUMENT_STORE` | `./.store` | — |
 | `CORE_BANKING_URL` | `http://localhost:8001` | — |
 | `GATEWAY_URL` | `http://localhost:8000` | — |
@@ -1331,6 +1437,55 @@ client-ID callback.
 
 **The data converter is constructed in exactly one place**, `config.build_data_converter()`,
 selected by `PAYLOAD_CODEC`. This is the seam described in §18.
+
+### 17.1 `DEMO_STEP_MS` — pacing the stages so they can be watched
+
+§2's primary audience is an SE driving the page live on a customer call. The
+stubbed stages complete in milliseconds, so the stepper jumps from 1 to 3
+before anyone has read it — and *visible progress through a long process* is
+the whole point being demonstrated. `DEMO_STEP_MS` pads the fast stages.
+Default `0`: `make test` and `make verify` are unaffected.
+
+**The delay goes inside the activity, never in the workflow.** A
+`workflow.sleep()` between steps would emit `TimerStarted` / `TimerFired` into
+every execution, invalidating all nine committed histories and forcing a
+re-capture of the §16.5 replay gate — the gate's whole value is that it is not
+re-captured to make it pass. Activity *duration* adds no events at all;
+`ActivityTaskScheduled/Started/Completed` are already there. It is also the
+better picture: a padded activity shows as **Running** on the Timeline carrying
+its `static_summary` (§12), which is the observability story, where a bare
+timer illustrates nothing.
+
+**`await asyncio.sleep()`, never `time.sleep()`.** Every activity here is
+`async def` and the worker registers no `activity_executor`, so they share the
+event loop; a blocking sleep would stall every other activity, every workflow
+task and the pollers. Temporal's own guidance is explicit that `time.sleep` in
+an `async def` activity "can block the entire system from doing anything".
+`core_banking/app.py` does use `time.sleep` for `CORE_SLOW_MS` and is correct
+to — its routes are sync `def`, which FastAPI runs in a threadpool. The
+precedent does not transfer.
+
+| Stage | Activity | Multiplier | At `1500` |
+|-------|----------|-----------:|----------:|
+| 1 Collect docs | `ingest_documents` | 2× | 3.0s |
+| 2 Extract | `fixture_call_llm` **only** | 1× per iteration | 1.5s |
+| 6 Send docs | `send_documents` | 1× | 1.5s |
+| 7 Notify | `notify` | 0.5× | 0.75s |
+
+Multipliers rather than one flat value, so the beats vary instead of landing
+on a suspiciously identical rhythm; ingest is longest because it is five
+documents.
+
+**Step 2 is padded under `FIXTURE_MODE` only.** A live extraction already takes
+real seconds per iteration, so padding it there would slow the demo down for no
+illustrative gain. `live_call_llm` is untouched.
+
+**Steps 3, 4 and 5 get nothing.** The KYC gate and the client-ID wait are
+already long and already the point, and `open_account` must not be touched at
+all: its 5s `start_to_close_timeout` **is** the ambiguous-timeout beat (§10.1),
+and padding it would either eat the margin or fire the timeout spuriously.
+`CORE_SLOW_MS` is the deliberate, purposeful version of a slow core, and it
+lives on the core-banking side.
 
 ## 18. Non-goals and stated scope cuts
 

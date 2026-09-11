@@ -30,7 +30,8 @@ class SendDocumentsResult(BaseModel):
 class NotifyRequest(BaseModel):
     client_key: str
     client_id: str | None
-    outcome: Literal["completed", "manual_intervention", "rejected_by_core"]
+    outcome: Literal["completed", "manual_intervention", "rejected_by_core",
+                     "already_onboarded"]
     recipients: list[Literal["onboarding_specialist", "end_client", "supervisor"]]
     packet_uri: str | None = None
     detail: str

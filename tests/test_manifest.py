@@ -1,6 +1,6 @@
 """The scenario manifest — §16.8 of the spec.
 
-THE DEFINITION OF DONE: all 22 pass and none are skipped.
+THE DEFINITION OF DONE: all 23 pass and none are skipped.
 
 Each task below converts its own stubs into real failing tests, then makes
 them pass. Do NOT delete a stub. Adding a scenario is allowed and must be
@@ -13,9 +13,10 @@ which for the workflow scenarios means booting a second `WorkflowEnvironment`
 per scenario for no added coverage. Ordinary tests in those modules keep the
 `test_` prefix; only the manifest's own scenarios delegate this way.
 """
-# All twenty-two are implemented: there is no `SKIP` reason left to import
+# All twenty-three are implemented: there is no `SKIP` reason left to import
 # `pytest` for. Adding a scenario means adding a row, a stub and a ruling --
-# and bringing both back.
+# and bringing both back. T-WF-10 is the one addition (R-036, §10.1.1); the
+# original set Task 1 stubbed was twenty-two.
 
 
 # --- §16.1 activity unit tests (Tasks 9, 10, 11) ---
@@ -125,6 +126,19 @@ async def test_T_WF_09_child_workflow_error_counts_as_a_spent_attempt(env):
     """
     from tests.test_onboarding_workflow import assert_child_workflow_error_counts_as_a_spent_attempt
     await assert_child_workflow_error_counts_as_a_spent_attempt(env)
+
+
+async def test_T_WF_10_first_attempt_duplicate_is_already_onboarded(env):
+    """Duplicate on the FIRST core attempt → already_onboarded, delivery skipped.
+
+    Added after Task 1 (§10.1.1) — the only scenario that was, and logged as a
+    ruling. T-WF-07 is the attempt-2 case; this is the one it must not be
+    confused with.
+
+    Delegates to tests/test_core_submission.py::assert_first_attempt_duplicate_is_already_onboarded.
+    """
+    from tests.test_core_submission import assert_first_attempt_duplicate_is_already_onboarded
+    await assert_first_attempt_duplicate_is_already_onboarded(env)
 
 
 # --- §16.3 time-skipping tests (Task 17) ---

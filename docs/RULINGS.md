@@ -1639,3 +1639,293 @@ they also pass against a page that never reached the state under test, and that
 a check which `continue`s past a missing selector is not a check. Both clauses
 live beside R-022's, because the next person to write a Playwright audit will
 reach for `file://` and for `if not el: continue` in the same sitting.
+
+## R-033 — the responsive block lost the cascade, and only a browser saw it
+
+**Task 22, Step 11 and Step 14.** The plan said "delete the 860px query and
+fold `.cols` into the 900px query". Followed literally, that put
+`.cols { grid-template-columns: 1fr }` inside a media block at line 192, while
+the unconditional `.cols { grid-template-columns: 1.55fr 1fr }` sat at line
+307. Identical specificity — `@media` contributes none — so the later rule won
+and **the columns never collapsed**. At 820px the console still rendered Case
+Actions and Demo Controls side by side.
+
+**Every grep-level test passed.** `test_there_is_exactly_one_breakpoint` saw
+exactly one breakpoint. The declaration was present, the value was right, the
+selector was right. Nothing in a text search can distinguish a rule that
+applies from a rule that is overridden three hundred lines later, because the
+difference is not in the text — it is in the order.
+
+Step 14's browser drive caught it: measured `.cols` at 452px + 291px on a
+820px viewport, where it should have been one column. Fixed by moving the whole
+responsive block to the end of the stylesheet, after every rule it overrides,
+and verified at the boundary — 901px gives two columns, 900px gives one.
+
+**Promoted, and it meets the rule of two on its own terms.** This is the third
+green gate that could not see what it was guarding: R-022 (tests pass against a
+page whose JavaScript throws), R-032 (tests pass against a page that never
+reached the state under test), and now a test that passes against a rule which
+never applies. The pattern is not "write more greps" — it is that a grep
+asserts the presence of text and CSS behaviour is decided by cascade, media
+state and DOM state, none of which are text.
+
+The plan's Step 11 is corrected to say *where* the block goes and why. An
+eleventh test pins source order — `.cols {` and `.stepper {` must both appear
+before `@media (max-width: 900px)` — and it was proven by planting the
+regression and watching it fail, because a guard nobody has seen fail is a
+guess. That takes the console suite to 31 and the whole suite to 218; the
+§16.8 manifest is untouched at 22, since these are ordinary tests and not
+scenarios.
+
+## R-034 — the console asked for a typed value through an untyped box
+
+**Found by running the demo, not by testing it.** At the KYC gate the analyst
+typed `04/15/1962` into the escalated `beneficial_owners[1].dob` and Approve
+came back with a raw Pydantic error, `pydantic.dev` URL and all.
+
+**The validator was right.** `apply_edits` deliberately leans on schema
+coercion — "re-validate so strings are coerced to dates/Decimals by the schema"
+— and Pydantic coerces ISO-8601 only. Refusing `04/15/1962` is the correct
+behaviour and should stay: silently guessing MM/DD against DD/MM **on a date of
+birth**, in a KYC file, is a worse outcome than a refusal. Leniency was
+considered and rejected on those grounds.
+
+**The defect was asking the question badly.** Four of the 22 required paths are
+not strings — `formation_date`, `beneficial_owners[].dob` and
+`control_person.dob` are `date`, `beneficial_owners[].ownership_pct` is
+`Decimal` — and the console rendered every gap as `<input type="text">` whose
+placeholder was the field's own label. It named a format nowhere. A US-format
+date is the single most likely thing a US bank analyst types into a DOB box.
+
+Fixed at the source: date-typed gaps render `type="date"`, which shows the
+analyst's own locale and always yields ISO in `.value`, so the ambiguity never
+reaches the workflow. `ownership_pct` gets `type="number"` bounded by §5.1's
+`<= 100`. No parsing, no guessing, no backend change.
+
+**The same bug lived twice.** R-021's inline table editor let the analyst
+correct *any* extracted field through a free-text `input.cell-edit` — so a dob
+corrected there hit the identical refusal. It now takes the same typing. The
+gap panel was the reported symptom; the table was the one nobody would have
+found until a customer did.
+
+**Two traps on the way, both the R-033 shape.** The CSS scoped the control as
+`.gap input[type=text]`, so the moment it became a date the rule stopped
+matching and the box silently lost its border, padding and focus ring —
+present, correct, not applying. And `type="date"` blanks itself if assigned a
+non-ISO value, which would have wiped every prefilled date in the table editor;
+it is safe only because `fmtValue` renders the payload's ISO string verbatim.
+Both were caught by driving Chrome, neither by a grep.
+
+Two tests added, one of them for the styling trap. The console suite is 33 and
+the whole suite 220; the §16.8 manifest is untouched at 22.
+
+**Left alone deliberately:** the raw Pydantic text in the error. With both
+input paths now emitting ISO it is unreachable through the UI, and the
+remaining trigger is the composite-path edit the code comment already
+anticipates. Worth trimming, not worth bundling into this fix.
+
+## R-035 — `export` in the Makefile handed the demo's pacing to the test suite
+
+**Task 23, found by measuring rather than assuming.** `DEMO_STEP_MS` defaults
+to `0` precisely so the suite pays nothing for it, and §17.1 says so. But
+`make/common.mk` does `-include .env` followed by a bare `export`, so the
+moment a real `.env` carried `DEMO_STEP_MS=2500` the pacing reached
+`make verify` as well: **154.88s, up from 31.79s.** Five times slower, still
+green, no signal that anything was wrong.
+
+A default is only a default until something sets the variable. The knob was
+correct; the protection was missing.
+
+`common.mk` already solves this exactly once — `test` and `verify` force
+`FIXTURE_MODE=1` inline, and the comment above the `export` says this is so
+"a stale `.env` cannot turn the suite live". That promise covered one variable.
+Both recipes now force `DEMO_STEP_MS=0` the same way, and the comment names the
+general rule: `export` hands the whole `.env` to every recipe, so opting the
+suite **out** is the only protection, and any future knob that slows or
+redirects a run belongs in that inline list.
+
+Verified with `.env` left at `2500` rather than by removing it — 31.36s. Fixing
+the measurement instead of the fault is how this would have come back.
+
+**Not promoted.** `.claude/rules/stack-and-make.md` already covers `make/`, and
+this is one line in one file rather than a pattern an implementer will meet
+repeatedly. The comment in `common.mk` is where someone editing these recipes
+will actually be looking.
+
+## R-036 — the manifest grows to 23: `duplicate` meant two things
+
+**Found by running the demo, and only because a different thing looked broken.**
+The "Slow first core-banking call" toggle appeared to do nothing. It wasn't the
+toggle: the ledger still held `onboarding-acme-corp` from an earlier run, and
+core banking returns `duplicate` *before* it reaches the delay. The idempotency
+key is the workflow ID, which §4.1 derives from the client key rather than a
+UUID, so it is the same key on every run — the slow call can only fire once per
+ledger. `make demo` chains `demo-reset`; `make up` does not.
+
+Chasing that surfaced the real defect. `status: "duplicate"` means two
+different things and the workflow treated them identically:
+
+- **attempt ≥ 2** — our own call created the account, the answer was lost. The
+  headline beat, working. Proceed.
+- **attempt 1** — a *previous* onboarding owns the account. Nothing in this run
+  created anything, and the workflow carried on to send a welcome pack and
+  notify the client about an account they had held for months.
+
+The second case is reachable in business terms, not only as a demo artifact: a
+workflow ID of `onboarding-<client-key>` forbids two *open* onboardings for one
+client, but nothing forbids a second one after the first completes.
+
+**Attempting the call stays correct in both cases.** There is no pre-check and
+there should not be one — asking idempotently *is* how you find out safely, and
+a pre-check would reintroduce the read-then-write race the key exists to
+remove. What was wrong was not distinguishing the answer.
+
+`already_onboarded` is now a terminal business status (§10.3 — never a failed
+workflow). Steps 5 and 6 are skipped. Step 7 still runs and should: `_finish`
+notifies on every terminal status and for anything but `completed` the
+recipients are the specialist and supervisor, **never the end client** (§5.5.1).
+So the customer hears nothing and the two people who need a record get one,
+which is what a bank wants from a repeat onboarding attempt.
+
+**This is the one scenario added after Task 1**, so the manifest is 23 and
+`make verify` prints `23/23`. `.claude/rules/testing.md` allows exactly this —
+"add a row with a new ID and log the addition as a ruling" — and this is that
+ruling. T-WF-07 (attempt 2) and T-WF-10 (attempt 1) are only meaningful as a
+pair: either alone passes against code that conflates them.
+
+**Replay was checked, not assumed.** I first told the user this change would
+force a re-capture of the committed histories. It does not. `core_duplicate`
+and `core_preexisting` sit on `OnboardingStatus`, a *query* return type, and
+queries are never recorded (§13). Widening two `Literal`s is also safe: the
+histories recorded `{"status":"completed",…}`, which stays a valid member, and
+no history takes the new branch, so the added `if` emits no commands. All four
+T-REPLAY scenarios pass with `histories/` untouched.
+
+**Two things the change taught, both worth more than the feature.**
+
+1. **A stage list is enumerated in twelve places.** Adding one value touched
+   the spec, `CONTRACT.md`, two model files, the workflow, the tracker, the
+   console's four maps, three test files and `make/common.mk`. The one that
+   bit was `NotifyRequest.outcome` — a `Literal` in `python/models/delivery.py`
+   that `_finish` validates against. Missing it did not raise a test failure:
+   the workflow task failed and *retried in a loop*, so the symptom was a
+   **query RPC timeout**, not a validation error. A failing workflow task looks
+   like a hung workflow.
+2. **A test that hangs is worse than a test that fails.** T-WF-10 first waited
+   on `handle.result()`, and against the unfixed code the workflow sailed past
+   the core call into `awaiting_client_id` and blocked on a signal that never
+   came — so the test hung for 120s instead of failing. Rewritten to wait on
+   the *stage* with a bounded `_wait_for`, it fails in 20s and names the stage
+   it actually reached. Promoted to `.claude/rules/testing.md`.
+
+## R-037 — the core retry goes back to the activity's RetryPolicy; supersedes R-015
+
+**Asked for directly, after the confusion R-015 predicted in writing actually
+happened.** R-015 moved `open_account`'s retry out of §10.2's activity policy
+and into a `while True` in the workflow, so the console could show
+`core_attempt` and `last_error` while the retry was in flight. It worked. It is
+now reverted.
+
+**What R-015 got right, so this is not a reversal of a mistake.** The
+visibility was real, the curve it hand-rolled matched §10.2 exactly, and
+`test_the_timeout_is_visible_in_status_while_it_retries` proved the claim
+rather than asserting it. Judged on its own terms it succeeded.
+
+**Why it lost anyway.** It optimised the console at the cost of the call site,
+and the call site is what a reader reaches first. §10.2's table says "initial
+1s, backoff 2.0, max interval 10s, unlimited attempts"; the code said
+`retry_policy=RetryPolicy(maximum_attempts=1)`. R-015 named that exact hazard —
+*"an implementer reading §10.2 will expect a `RetryPolicy` here and find
+`maximum_attempts=1`, which reads like the retry was disabled"* — and shipped a
+comment as the mitigation. The comment was there, in full, pointing at R-015.
+It was not enough. **A comment explaining why code contradicts the spec is
+weaker than code that agrees with it.**
+
+**What is given up.** The console cannot show the retry while it happens. The
+workflow is blocked in one `execute_activity` and learns nothing until it
+returns; an in-flight activity retry cannot be surfaced into a query by any
+means. `core_attempt` is now reported *after* the fact, and `last_error` never
+arrives at all for a retryable failure. The console's `submitting_to_core`
+panel says so and points at the Temporal UI rather than showing a count it does
+not have.
+
+**Which is arguably the better demo.** The platform runs the retry, so the
+platform is where it is watched: a pending activity shows its attempt number
+and last failure natively, and the recorded history keeps `attempt: 2` and the
+timeout on the started event afterwards. Nothing was instrumented to get that.
+§13 and §10.1 now say this out loud instead of promising console visibility
+that no longer exists.
+
+**The trap, and it would have broken the happy path.** §10.1.1 distinguishes a
+duplicate on attempt 1 (a previous onboarding owns the account →
+`already_onboarded`) from one on attempt ≥ 2 (our own call landed, the answer
+was lost → proceed). That test read `self._core_attempt`, which stops existing
+here. Left alone, **every successful retry would report attempt 1, be read as a
+pre-existing account, and stop the workflow instead of completing it.** The
+replacement is `OpenAccountAck.attempt`, stamped by the activity from
+`activity.info().attempt`.
+
+Reading that value is safe. Deriving the **idempotency key** from it is §10.1's
+trap and produces the duplicate account the design prevents. The two are
+different uses of the same number and the spec now separates them explicitly.
+
+**Four things went wrong on the way, and each is worth more than the change.**
+
+1. **A test passed for the wrong reason, for the fourth time this build.**
+   Step 1 was meant to fail before the model gained its field. It passed:
+   Pydantic's `extra` defaults to `"ignore"`, so the stub's `attempt=2` was
+   silently dropped and the assertion was carried by the old loop's counter.
+   The plan's own prediction was wrong.
+2. **The workflow suite could not have caught the activity regressing.**
+   T-WF-07 and T-WF-10 both swap `open_account` for a stub, and the stubs stamp
+   `attempt` themselves — so deleting the line from the real activity left the
+   whole suite green while breaking every live retry. Proven by planting it.
+   `test_the_ack_reports_the_activity_attempt_number` is the only test that
+   covers it, and it exists because R-024's rule was re-read: stubs prove our
+   side of a contract, not the contract.
+3. **A source-grep guard fired on legitimate code — third instance.**
+   `test_key_is_never_derived_from_the_attempt_number` banned the word
+   "attempt" from the activity outright. It was a proxy for the real property,
+   and the proxy broke the moment §10.1.1 gave the activity a reason to read
+   the attempt number. Rewritten to assert the property on the wire: drive the
+   activity on attempts 1, 2 and 9 and the key must be byte-identical. Proven
+   by planting `f"{key}-{attempt}"` and watching it fail. `.claude/rules/`
+   already warned about grep guards twice; this is the third, and the fix is
+   the general lesson — assert the property, not its textual shadow.
+4. **A stale worker presented as an HTTP timeout.** The re-capture failed with
+   `httpx.ReadTimeout` on a status poll. The cause was a worker started 21
+   minutes before the model changed, still holding the old `OpenAccountAck`
+   class: `AttributeError: no attribute 'attempt'` failed the workflow task,
+   which retried forever, so the query could not be served and the HTTP client
+   gave up. `make demo`'s `pgrep` guard will not restart a worker that is
+   already up. Promoted to `stack-and-make.md`.
+
+And one mistake caught only by reading the log: the first successful re-capture
+ran against the **live API**, because `make restart-worker` does not inherit an
+inline `FIXTURE_MODE=1` given to a different target. §16.7 requires histories
+to be captured through the fixtures so the run is reproducible. Discarded and
+re-captured with the worker actually in `fixture_call_llm`, confirmed in
+`/tmp/onboarding-worker.log`.
+
+**The histories were re-captured, and that is correct exactly here.**
+`T-REPLAY-03` went red with *"Fail workflow machine does not handle this event:
+HistoryEvent(id: 33, TimerStarted)"* — the backoff timer the deleted loop
+created. The gate exists to catch an *unintended* command change; this task's
+purpose was an intended one. The diff on `timeout-retry.json` is exactly the
+loop's machinery and nothing else:
+
+| event | before | after |
+|---|---|---|
+| `activityTaskScheduled` | 5 | 4 |
+| `activityTaskTimedOut` | 1 | 0 |
+| `timerStarted` | 3 | 2 |
+| `timerFired` | 1 | 0 |
+| `workflowTask*` | 11 | 9 |
+| **total** | **62** | **51** |
+
+Eleven fewer events for the same business outcome. The retry survives as
+`attempt: 2` and a `lastFailure` on `open_account`'s started event, which is
+also why the README, `TALK_TRACK.md` and the design diagrams had to be
+corrected: they promised two labelled Timeline rows, and there is now one.
+
+Suite 234 passed, 0 skipped — one test removed, one added.

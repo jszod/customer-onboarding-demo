@@ -61,6 +61,8 @@ class OnboardingWorkflow:
         self._client_id_assignment: ClientIdAssignment | None = None
         self._core_attempt = 0
         self._core_request_id: str | None = None
+        self._core_duplicate = False
+        self._core_preexisting = False
         self._last_error: str | None = None
         self._client_id_chase = 0
 
@@ -158,50 +160,68 @@ class OnboardingWorkflow:
         self._stage = "submitting_to_core"
         self._track(req)
 
-        # A workflow-level retry loop, NOT the activity retry policy. §10.2's
-        # table describes the policy shape -- initial 1s, backoff 2.0, max
-        # interval 10s, unlimited attempts -- and this reproduces it exactly,
-        # but as workflow-visible steps. Activity retries do not touch workflow
-        # state, and §13 requires the console to show `core_attempt` and
-        # `last_error` live while the retry is happening. See R-015.
-        while True:
-            self._core_attempt += 1
-            try:
-                ack: OpenAccountAck = await workflow.execute_activity(
-                    "open_account",
-                    OpenAccountRequest(
-                        # Stable across every retry. NEVER a retry counter --
-                        # that is the trap in §10.1 and it produces exactly the
-                        # duplicate account this design prevents.
-                        idempotency_key=workflow.info().workflow_id,
-                        application=self._application),
-                    result_type=OpenAccountAck,
-                    start_to_close_timeout=timedelta(seconds=5),
-                    retry_policy=RetryPolicy(maximum_attempts=1),
-                    summary=f"Submit account request to core banking "
-                            f"(attempt {self._core_attempt})")
-                break
-            except ActivityError as e:
-                cause = e.cause
-                if isinstance(cause, ApplicationError) and cause.non_retryable:
-                    # A business rejection: complete, do not crash (§10.3).
-                    self._last_error = _failure_message(e)
-                    return await self._finish(req, "rejected_by_core", None,
-                                              self._last_error)
-                self._last_error = (f"attempt {self._core_attempt}: "
-                                    f"{_failure_message(e)}")
-                await workflow.sleep(
-                    timedelta(seconds=min(10, 2 ** (self._core_attempt - 1))),
-                    summary=f"Backoff before core banking attempt "
-                            f"{self._core_attempt + 1}")
+        # §10.2's retry policy, as written: initial 1s, backoff 2.0, max
+        # interval 10s, unlimited attempts. The retry belongs to the platform.
+        #
+        # An earlier build ran this as a `while True` in the workflow so the
+        # console could show the attempt count live. It worked and it was
+        # abandoned: `maximum_attempts=1` at a call site reads as "retry
+        # disabled" to anyone who has just read §10.2, and that confusion cost
+        # more than the visibility bought. The retry is narrated in the
+        # Temporal UI, which shows a pending activity's attempt and last
+        # failure natively. See R-037, which supersedes R-015.
+        try:
+            ack: OpenAccountAck = await workflow.execute_activity(
+                "open_account",
+                OpenAccountRequest(
+                    # Stable across every retry. NEVER a retry counter -- that
+                    # is the trap in §10.1 and it produces exactly the
+                    # duplicate account this design prevents.
+                    idempotency_key=workflow.info().workflow_id,
+                    application=self._application),
+                result_type=OpenAccountAck,
+                start_to_close_timeout=timedelta(seconds=5),
+                retry_policy=RetryPolicy(
+                    initial_interval=timedelta(seconds=1),
+                    backoff_coefficient=2.0,
+                    maximum_interval=timedelta(seconds=10)),
+                summary="Submit account request to core banking")
+        except ActivityError as e:
+            cause = e.cause
+            if isinstance(cause, ApplicationError) and cause.non_retryable:
+                # A business rejection: complete, do not crash (§10.3).
+                self._last_error = _failure_message(e)
+                return await self._finish(req, "rejected_by_core", None,
+                                          self._last_error)
+            # Unreachable while attempts are unlimited. Here so that capping
+            # them later surfaces the failure instead of swallowing it.
+            raise
 
+        # How many tries it took, reported by the activity (§10.1.1) because
+        # the workflow saw one call and cannot count them itself.
+        self._core_attempt = ack.attempt
         self._core_request_id = ack.request_id
         if ack.status == "duplicate":
-            # The proof the key worked: the first call did create the account,
-            # the answer was simply lost (§10.1).
+            self._core_duplicate = True
+            if ack.attempt == 1:
+                # §10.1.1. A duplicate on the FIRST attempt means nothing in
+                # this run created the account -- a previous onboarding for
+                # this client did. Carrying on would send a welcome pack and
+                # tell the client about an account they have held for months.
+                # Terminal business status, never a failed workflow (§10.3);
+                # `_finish` notifies the specialist and supervisor, and by
+                # §5.5.1 the end client is not on that list.
+                self._core_preexisting = True
+                return await self._finish(
+                    req, "already_onboarded", None,
+                    f"account {ack.request_id} already exists for this client "
+                    f"from an earlier onboarding; nothing was created and no "
+                    f"documents were sent")
+            # Attempt >= 2: our OWN earlier call created it and the answer was
+            # lost. The proof the key worked, and the headline beat (§10.1).
             workflow.logger.info(
-                "core banking returned duplicate for %s -- the idempotency key "
-                "prevented a second account", ack.request_id)
+                "core banking returned duplicate on attempt %d -- the "
+                "idempotency key prevented a second account", ack.attempt)
 
         self._stage = "awaiting_client_id"
         self._pending_since = workflow.now()
@@ -412,4 +432,6 @@ class OnboardingWorkflow:
             last_error=self._last_error, core_request_id=self._core_request_id,
             client_id=(self._client_id_assignment.client_id
                        if self._client_id_assignment else None),
-            extraction_iterations=self._iterations)
+            extraction_iterations=self._iterations,
+            core_duplicate=self._core_duplicate,
+            core_preexisting=self._core_preexisting)

@@ -194,6 +194,9 @@ async def fixture_call_llm(req: LLMRequest) -> LLMResponse:
     """Recorded responses (§16.0, §16.7). Selected by FIXTURE_MODE at worker
     startup -- never by an `if` inside the workflow, which would make the two
     modes non-replay-compatible."""
+    # §17.1. Fixtures return instantly, so step 2 would otherwise be invisible.
+    # `live_call_llm` gets nothing: a real call already takes real seconds.
+    await config.demo_pause(1)
     fixture_dir = Path(os.environ.get("FIXTURE_DIR", "fixtures"))
     client_key = (req.manifest.refs[0].uri.split("/")[0]
                   if req.manifest.refs else "acme-corp")
