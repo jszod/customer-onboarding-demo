@@ -72,7 +72,23 @@ WSL; the point of `demo.sh` is that a full Linux subsystem is not required.
 The same §12 UI floor applies here: `temporal --version` must report **UI
 v2.34.6 or newer** for the activity summaries on the Timeline to render.
 
-**3. Run it:**
+**3. Set up `.env`, keyless is fine to start:**
+
+    cp .env.example .env
+
+`demo.sh` reads `.env` the same way `make` does — §17's knobs (`FIXTURE_MODE`,
+`ANTHROPIC_API_KEY`, the SLA profile) are otherwise invisible to it, and
+without `FIXTURE_MODE=1` a keyless worker fails on the first model call with
+nothing but `.run/worker.log` to say why. Leave `ANTHROPIC_API_KEY` blank and
+run keyless off the committed fixtures:
+
+    FIXTURE_MODE=1 bash ./demo.sh up
+
+Every step is real except the model call. Put a real key on the
+`ANTHROPIC_API_KEY` line in `.env` instead, and drop `FIXTURE_MODE=1`, to run
+the live demo once you have one.
+
+**4. Run it:**
 
     bash ./demo.sh up
 
@@ -80,19 +96,19 @@ Type `bash ./demo.sh up`, not `./demo.sh up` — Git on Windows does not
 reliably preserve the executable bit, so a bare `./demo.sh` can fail with a
 permission error that has nothing to do with the script itself.
 
-**4. Run the suite** the same way as anywhere else, no script and no make
+**5. Run the suite** the same way as anywhere else, no script and no make
 needed:
 
     uv run pytest
 
-**5. Do not install `make`.** winget, Chocolatey and Scoop all give you GNU
+**6. Do not install `make`.** winget, Chocolatey and Scoop all give you GNU
 make alone, and its recipes then run under `cmd.exe`, failing on the first
 `rm -rf` in a way that looks like a bug in this repo rather than a missing
 shell. Only MSYS2, Cygwin, or WSL supply the POSIX tools Make actually needs
 underneath it, and each of those is a larger install than the demo itself —
 `demo.sh` exists so you never need any of them.
 
-**6. WSL, if you want it anyway.** Everything in this repo — `make` included —
+**7. WSL, if you want it anyway.** Everything in this repo — `make` included —
 works untouched inside WSL, at the cost of a real Linux install and forwarding
 `:8000` and `:8233` out to your Windows browser. Reach for it only if you
 specifically want the `make` targets that stay developer-only (see the

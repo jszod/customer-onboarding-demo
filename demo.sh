@@ -19,11 +19,48 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
 cd "$ROOT"
-RUN="$ROOT/.run"
+RUN="${DEMO_RUN_DIR:-$ROOT/.run}"
 mkdir -p "$RUN"
 
 pidfile() { printf '%s/%s.pid' "$RUN" "$1"; }
 logfile() { printf '%s/%s.log' "$RUN" "$1"; }
+
+# `.env` is Make syntax (`-include` + `export` in make/common.mk), not shell --
+# a literal dollar is written `$$` there, and `.env.example` says so. Sourcing
+# it here would hand bash that same file and let it mis-expand `$$` (and
+# anything else in it) instead of reading it as data, so this parses it
+# line-by-line: blanks and `#` comments skipped, only `NAME=value` lines
+# accepted, one layer of surrounding quotes stripped, `$$` collapsed to a
+# literal `$` to match what Make would hand a recipe. An already-set
+# environment variable wins over the file, same as a recipe that sets a
+# variable inline beats `.env` under Make.
+load_env() {
+  local f="$ROOT/.env" line name value
+  [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"                       # a Windows-edited .env
+    [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
+    [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    name="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    if [[ "$value" == \"*\" && "$value" == *\" && ${#value} -ge 2 ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$value" == \'*\' && "$value" == *\' && ${#value} -ge 2 ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    value="${value//\$\$/\$}"
+    [ -z "${!name+x}" ] && export "$name=$value"
+  done < "$f"
+  return 0    # the loop's last body statement is often a no-op `&&` that
+              # evaluates false whenever a variable is already set -- the
+              # ORDINARY case -- and a function returning that as ITS OWN
+              # exit status aborts the whole script under `set -e` the
+              # moment it is called as a bare statement, which this always
+              # is. Measured, not theoretical: this silently killed every
+              # verb with no output at all whenever `.env` had a variable
+              # the caller's environment also set.
+}
+load_env
 
 label() {
   case $1 in
@@ -108,10 +145,43 @@ cmd_up() {
   spawn core    "$py" -m uvicorn core_banking.app:app --port 8001
   spawn gateway "$py" -m uvicorn web.gateway:app --port 8000
   spawn worker  "$py" -m python.worker
-  echo ""
-  echo "  console      -> http://localhost:8000"
-  echo "  temporal UI  -> http://localhost:8233"
-  echo "  core banking -> http://localhost:8001/ledger"
+
+  # "started" is $! having a value, nothing more -- a bound-port failure or a
+  # worker that can't reach Temporal both exit within a second or two. Check
+  # the OS, not the print, before claiming the stack is up.
+  sleep 5
+  local all_up=1
+  for n in temporal core gateway worker; do
+    if ! alive "$n"; then
+      all_up=0
+      echo "  $(label "$n") did not stay up -- see $(logfile "$n")" >&2
+    fi
+  done
+
+  if alive worker; then
+    if grep -q "worker polling" "$(logfile worker)" 2>/dev/null; then
+      local impl=""
+      impl=$(grep "call_llm implementation" "$(logfile worker)" 2>/dev/null | tail -1 || true)
+      if [ -n "$impl" ]; then
+        echo "  worker: $impl"
+      else
+        echo "  worker is polling, but never logged which call_llm it chose"
+      fi
+    else
+      echo "  worker: started but not polling yet -- see $(logfile worker)"
+    fi
+  fi
+
+  if [ "$all_up" -eq 1 ]; then
+    echo ""
+    echo "  console      -> http://localhost:8000"
+    echo "  temporal UI  -> http://localhost:8233"
+    echo "  core banking -> http://localhost:8001/ledger"
+  else
+    echo "" >&2
+    echo "  not everything came up -- see the log(s) named above" >&2
+    return 1
+  fi
 }
 
 cmd_down()   { for n in worker gateway core temporal; do stop "$n"; done; }
@@ -133,7 +203,16 @@ cmd_restart_worker() {
   echo "  the workflow survives this"
 }
 
-cmd_logs() { tail -f "$RUN"/*.log; }
+cmd_logs() {
+  shopt -s nullglob
+  local logs=("$RUN"/*.log)
+  shopt -u nullglob
+  if [ ${#logs[@]} -eq 0 ]; then
+    echo "no logs yet -- run \`up\` first"
+    return 0
+  fi
+  tail -f "${logs[@]}"
+}
 
 case "${1:-}" in
   demo)           cmd_reset; cmd_up ;;

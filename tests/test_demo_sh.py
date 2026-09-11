@@ -27,10 +27,16 @@ def test_the_script_exists_and_is_bash():
 
 
 def test_every_verb_is_handled():
+    """Matches the verb COLUMN of the usage text, not the whole blob -- `demo`
+    is a substring of the `usage: bash ./demo.sh <command>` header line above
+    it, so a plain substring check can never fail even if the `demo` row
+    itself went missing."""
     out = run("no-such-verb")
     assert out.returncode != 0
+    text = out.stdout + out.stderr
     for verb in VERBS:
-        assert verb in out.stdout + out.stderr, f"{verb} missing from usage"
+        assert re.search(rf"^\s*{re.escape(verb)}\b", text, re.M), \
+            f"{verb} missing from the usage's verb column"
 
 
 def test_no_pgrep_or_pkill_anywhere():
@@ -46,37 +52,54 @@ def test_no_pgrep_or_pkill_anywhere():
 def test_the_long_running_processes_do_not_go_through_uv_run():
     """The measured trap: `uv run` forks a child python, the CHILD binds the
     port, so `$!` records uv and killing it orphans the listener. The venv
-    interpreter is started directly so `$!` IS the port owner."""
+    interpreter is started directly so `$!` IS the port owner.
+
+    Asserted on the `spawn ...` CALL lines themselves (in `cmd_up` and
+    `cmd_restart_worker`), not on the `nohup` line inside `spawn()`'s own
+    body -- there the command arrives only as `spawn`'s captured arguments
+    (`nohup "$@" > ...`), so that line is a fixed string that can never
+    contain `uv run` no matter what any caller passes it. Asserting on it
+    could never fail."""
     body = SCRIPT.read_text()
     assert ".venv/bin/python" in body
     assert ".venv/Scripts/python.exe" in body, "no Windows interpreter path"
-    for line in body.splitlines():
-        if "nohup" in line:
-            assert "uv run" not in line, f"uv run in a spawn line: {line.strip()}"
+    calls = [line for line in body.splitlines()
+             if re.match(r"^\s*spawn\s+\S", line)]
+    assert len(calls) >= 4, f"expected at least 4 spawn call sites, found {calls}"
+    for line in calls:
+        assert "uv run" not in line, f"uv run in a spawn call: {line.strip()}"
 
 
-def test_status_on_a_stopped_stack_says_so_and_exits_zero():
-    out = run("status")
+def test_status_on_a_stopped_stack_says_so_and_exits_zero(tmp_path):
+    """Runs against an empty `DEMO_RUN_DIR`, never the real `.run/` — this
+    suite must not read (or depend on) the state of a stack the developer may
+    actually have up (README Quickstart is `make demo` then `make verify`).
+
+    Asserts `stopped` itself, not just that the label is printed: both the
+    running and the stopped branch print the label, so a check that stops at
+    the label passes either way."""
+    env = {**os.environ, "DEMO_RUN_DIR": str(tmp_path)}
+    out = run("status", env=env)
     assert out.returncode == 0, out.stderr
     for name in ("temporal", "core banking", "gateway", "worker"):
-        assert name in out.stdout
+        assert re.search(rf"{re.escape(name)}\s*:\s*stopped", out.stdout), out.stdout
 
 
 def test_a_stale_pid_file_reads_as_stopped_and_does_not_block(tmp_path):
     """§14.1's stated new failure mode. A killed process leaves its file
     behind, so liveness must be checked rather than existence — and a stale
-    file must not make `up` refuse to start."""
-    run("down")
-    runsdir = ROOT / ".run"
-    runsdir.mkdir(exist_ok=True)
-    stale = runsdir / "gateway.pid"
+    file must not make `up` refuse to start.
+
+    Runs against `DEMO_RUN_DIR=tmp_path`, never the real `.run/` — a `down`
+    call here would tear down whatever the developer actually has running
+    (README Quickstart is `make demo` then `make verify`), so this test must
+    not be able to touch a live stack at all, not even to reset it first."""
+    stale = tmp_path / "gateway.pid"
     stale.write_text("999999\n")          # a pid that cannot be alive
-    try:
-        out = run("status")
-        assert out.returncode == 0, out.stderr
-        assert re.search(r"gateway\s*:\s*stopped", out.stdout), out.stdout
-    finally:
-        stale.unlink(missing_ok=True)
+    env = {**os.environ, "DEMO_RUN_DIR": str(tmp_path)}
+    out = run("status", env=env)
+    assert out.returncode == 0, out.stderr
+    assert re.search(r"gateway\s*:\s*stopped", out.stdout), out.stdout
 
 
 def test_gitattributes_pins_shell_scripts_to_lf():

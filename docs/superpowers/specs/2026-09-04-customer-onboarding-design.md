@@ -1157,9 +1157,12 @@ them changes what the demo demonstrates.
 | Process | Command | Port |
 |---------|---------|------|
 | Temporal dev server | `temporal server start-dev --ui-port 8233` | 7233 / UI 8233 |
-| Worker | `uv run python -m worker` | — |
-| Gateway + console | `uv run uvicorn web.gateway:app --port 8000` | 8000 |
-| Fake core banking | `uv run uvicorn core_banking.app:app --port 8001` | 8001 |
+| Worker | the venv interpreter directly: `python -m python.worker` | — |
+| Gateway + console | the venv interpreter directly: `python -m uvicorn web.gateway:app --port 8000` | 8000 |
+| Fake core banking | the venv interpreter directly: `python -m uvicorn core_banking.app:app --port 8001` | 8001 |
+
+Never `uv run <cmd>` — §14.1 explains why: it forks a child that binds the
+port, so the pid `demo.sh` records is not the process holding it.
 
 Pattern borrowed from `canonical-ai-demo/make/common.mk`: idempotent start
 targets, background processes with logs under a temp directory, and `up`
@@ -1187,7 +1190,7 @@ case (§2), and `uv.lock` already pins the environment.
 |--------|---------|
 | `up` / `down` / `status` / `logs` | canonical's verbs, for muscle memory across demos |
 | `demo` | reset state, start everything, print the URLs |
-| `worker` / `kill-worker` / `restart-worker` | the worker-kill beat. **Not** a bare `kill` — ambiguity mid-demo is bad |
+| `restart-worker` | the worker-kill beat — stop, then start the worker back up, proving the workflow survives it. **Not** a bare `kill` — ambiguity mid-demo is bad |
 | `test` | run the suite — the verification gate (§16) |
 | `verify` | `test` plus `skipped == 0`; the machine-checkable definition of done (§16.8) |
 | `demo-reset` | clear the ledger, outbox, and working document store |

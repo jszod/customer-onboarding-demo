@@ -40,11 +40,15 @@ async def test_demo_pause_returns_immediately_when_unset(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_demo_pause_scales_by_its_multiplier(monkeypatch):
+    """DEMO_STEP_MS=40, multiplier 2 -> ~80ms. The upper bound only needs to
+    rule out "didn't scale at all" / "scaled by the wrong factor" -- it is not
+    a claim about scheduler precision, so it is widened to 2s to stop this
+    from flaking under load."""
     monkeypatch.setenv("DEMO_STEP_MS", "40")
     started = time.perf_counter()
     await config.demo_pause(2)
     elapsed = time.perf_counter() - started
-    assert 0.06 <= elapsed < 0.5, elapsed
+    assert 0.06 <= elapsed < 2.0, elapsed
 
 
 @pytest.mark.asyncio

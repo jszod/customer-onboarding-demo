@@ -2,11 +2,17 @@
 
 The idempotency key arrives on the request and IS the parent workflow ID --
 identical on every retry, because the workflow ID does not change when an
-activity is retried. Never rebuild it here from anything the SDK varies per
-retry (`activity.info()` exposes a retry counter, and reaching for it is the
-trap §10.1 names); doing so produces exactly the duplicate account the design
-exists to prevent. The word does not appear in this module on purpose, and
-`tests/test_activity_core_banking.py` asserts that.
+activity is retried. It is forwarded to core banking exactly as it arrived;
+never rebuilt here from anything the SDK varies per retry. Doing so would
+produce exactly the duplicate account the design exists to prevent.
+
+§10.1.1 gives this module one legitimate reason to read its own retry
+counter below: to stamp which try got the answer, on the ack this activity
+returns -- never to build the key from it. `tests/test_activity_core_banking.py`
+asserts the real property behaviourally (drive the activity across several
+attempt numbers and the key on the wire stays byte-identical) rather than by
+grepping this file for the counter's name, which stopped working the moment
+that legitimate read was added; R-037 has the history.
 
 The HTTP client's timeout is deliberately far longer than the activity's 5s
 `start_to_close_timeout`. The activity timing out while the request is still in

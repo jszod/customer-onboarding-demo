@@ -8,16 +8,29 @@ person at a prompt. Generating the list from the targets removes one copy;
 this test removes the way the generated one goes quietly incomplete.
 """
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
+
+# The README tells the Windows customer NOT to install `make` (§14.1) — the
+# routes that provide it there give GNU make alone, with no POSIX shell
+# underneath it. A test that shells out to `make` unconditionally is exactly
+# the thing that turns "no make" advice into a suite failure on his machine.
+# A dev machine has `make`, so nothing skips there and `make verify`'s
+# zero-skipped gate is unaffected.
+needs_make = pytest.mark.skipif(shutil.which("make") is None,
+                                reason="make is not on PATH (expected on Windows)")
 MK = ROOT / "make" / "common.mk"
 
-# Started by `up`, never typed directly. `kill-worker` is reachable but is
-# `restart-worker`'s first half, and naming it in help invites a bare `kill`
-# mid-demo, which §14 explicitly does not want.
-INTERNAL = {"temporal", "core-banking", "gateway", "worker", "kill-worker", "help"}
+# `worker` and `kill-worker` were folded into `demo.sh`'s `restart-worker`
+# verb (Task 26, §14.1) and no longer exist as targets in common.mk at all --
+# removed from this set rather than left behind as stale exclusions for
+# targets that were never at risk of appearing unannotated in `make help`.
+INTERNAL = {"temporal", "core-banking", "gateway", "help"}
 
 GROUPS = ("setup", "demo", "verify", "build")
 
@@ -54,6 +67,7 @@ def test_annotations_use_a_known_group_and_sort_index():
     assert not bad, bad
 
 
+@needs_make
 def test_help_lists_every_annotated_target():
     """The generator is a grep/sed/awk pipeline, so it is worth running rather
     than reading. It also catches the trap that broke it once: `$(lastword
@@ -71,6 +85,7 @@ def test_help_lists_every_annotated_target():
         assert group.upper() in out.stdout, f"group {group!r} missing from help"
 
 
+@needs_make
 def test_help_works_from_the_second_entry_point():
     """§15 — `python/Makefile` is the same include one directory down, and
     `THIS_MK` has to resolve from there too."""
