@@ -1929,3 +1929,35 @@ also why the README, `TALK_TRACK.md` and the design diagrams had to be
 corrected: they promised two labelled Timeline rows, and there is now one.
 
 Suite 234 passed, 0 skipped — one test removed, one added.
+
+## R-038 — `demo.sh`'s own header named the tool it forbids; and a test in the
+task brief checked a verb that does not exist
+
+Task 26. Two small conflicts inside the task's own supplied text, both
+resolved the same way: keep the mechanism, adjust the wording to describe it
+without breaking the gate that reads the wording.
+
+**The comment.** `demo.sh`'s header, as given, explained that liveness is
+`kill -0` against a recorded pid "never `pgrep`", and that `pgrep -f` is what
+cost R-001 and R-025. `tests/test_demo_sh.py::test_no_pgrep_or_pkill_anywhere`
+greps `demo.sh` itself for the literal string `pgrep` — and `.claude/rules/
+testing.md` has already named this trap once: *"A test that greps source makes
+the prose in that file part of the test."* Reworded the two sentences to name
+the hazard ("a command-line-search tool") without spelling the forbidden
+command, keeping the same meaning. No functional change.
+
+**The test.** `test_make_delegates_rather_than_duplicating`, as given, looped
+`("up", "down", "status", "demo-reset", "restart-worker")` and asserted
+`f"demo.sh {verb}"` for each — assuming the make target name and the demo.sh
+verb are identical. They are not: `demo.sh`'s verb list (also given, in the
+same file, as `VERBS`) has no `demo-reset` entry, only `reset` — and Step 6's
+own supplied recipe correctly calls `demo.sh reset` under the `demo-reset:`
+target. Followed the working code over the assertion: changed the loop to map
+`demo-reset` -> `reset` explicitly rather than inventing a `demo-reset` verb
+that every other part of the brief (the VERBS tuple, the usage text, Step 3's
+`case`) says does not exist.
+
+Both are cosmetic — no runtime behaviour changed, no coverage lost. Logged
+because the brief said "use this test verbatim" and "do not simplify" the
+measured facts, and both edits are visible departures from that verbatim text
+that a reviewer should be able to find the reasoning for in one place.

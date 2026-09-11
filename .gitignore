@@ -7,3 +7,4 @@ core_banking/ledger.db
 __pycache__/
 .venv/
 .pytest_cache/
+.run/

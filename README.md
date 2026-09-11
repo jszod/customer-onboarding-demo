@@ -49,6 +49,55 @@ Every failure path ends in a **business status**, never a failed workflow. A
 failed workflow reads as a bug; a completed one carrying `manual_intervention`,
 `rejected_by_core` or `already_onboarded` reads as a process.
 
+## Running this on Windows
+
+`demo.sh` (repo root) is the entry point for this — one bash script, no
+`make`. It runs unmodified on macOS, Linux, and Windows under Git Bash.
+
+**1. Check what you have.** Open Git Bash and run:
+
+    git --version
+    bash --version
+
+Git for Windows supplies both, and you need Git to clone this repo anyway. If
+`bash` is missing, install [Git for Windows](https://gitforwindows.org/) — not
+WSL; the point of `demo.sh` is that a full Linux subsystem is not required.
+
+**2. Install the three prerequisites**, from Git Bash or PowerShell:
+
+    winget install Temporal.Temporal
+    winget install astral-sh.uv
+    winget install Python.Python.3.12
+
+The same §12 UI floor applies here: `temporal --version` must report **UI
+v2.34.6 or newer** for the activity summaries on the Timeline to render.
+
+**3. Run it:**
+
+    bash ./demo.sh up
+
+Type `bash ./demo.sh up`, not `./demo.sh up` — Git on Windows does not
+reliably preserve the executable bit, so a bare `./demo.sh` can fail with a
+permission error that has nothing to do with the script itself.
+
+**4. Run the suite** the same way as anywhere else, no script and no make
+needed:
+
+    uv run pytest
+
+**5. Do not install `make`.** winget, Chocolatey and Scoop all give you GNU
+make alone, and its recipes then run under `cmd.exe`, failing on the first
+`rm -rf` in a way that looks like a bug in this repo rather than a missing
+shell. Only MSYS2, Cygwin, or WSL supply the POSIX tools Make actually needs
+underneath it, and each of those is a larger install than the demo itself —
+`demo.sh` exists so you never need any of them.
+
+**6. WSL, if you want it anyway.** Everything in this repo — `make` included —
+works untouched inside WSL, at the cost of a real Linux install and forwarding
+`:8000` and `:8233` out to your Windows browser. Reach for it only if you
+specifically want the `make` targets that stay developer-only (see the
+Commands table below): `fixtures`, `histories` and `documents`.
+
 ## Setup
 
 Three things, in this order. Only the first is specific to this demo.
@@ -77,10 +126,10 @@ UI read as the business process rather than as a stack trace — do not render
 below it. Any recent CLI clears that floor comfortably; if you are on an old
 install, upgrade rather than debugging a missing summary as a code bug.
 
-You do not start the server by hand. `make demo` does it, guarded by `pgrep` so
-it is idempotent, and `make down` stops it. If the console comes up but nothing
-progresses, check `make status` first — a missing CLI shows up there as
-`temporal : stopped`, and the reason will be in `/tmp/onboarding-temporal.log`.
+You do not start the server by hand. `make demo` does it, tracked by a pid
+file so it is idempotent, and `make down` stops it. If the console comes up
+but nothing progresses, check `make status` first — a missing CLI shows up
+there as `temporal : stopped`, and the reason will be in `.run/temporal.log`.
 
 ### 2. uv
 
@@ -216,7 +265,7 @@ themselves rather than maintained by hand, so it cannot fall behind
 | `make up` | start them *without* resetting — keeps the ledger, so the ambiguous-timeout beat will not re-fire |
 | `make down` | stop everything this Makefile started |
 | `make status` | which of the four processes are up, and on which ports |
-| `make logs` | tail all four process logs from `/tmp` |
+| `make logs` | tail all four process logs from `.run/` |
 | `make demo-reset` | clear state so you can Submit again — **no restart needed**; drops the ledger, `outbox/`, the document store and the outage flag |
 | `make restart-worker` | the worker-kill beat — prove the workflow survives it |
 | **Verifying** | |
@@ -227,6 +276,10 @@ themselves rather than maintained by hand, so it cannot fall behind
 | `make fixtures` | re-record `fixtures/` against the live model (needs a key) |
 | `make histories` | re-capture `histories/`, the replay gate's input |
 | `make clean` | `down` + `demo-reset` |
+
+Every `make` verb above has a `bash ./demo.sh` equivalent (see [Running this
+on Windows](#running-this-on-windows)) **except `fixtures`, `histories` and
+`documents`**, which need an API key and stay developer-only.
 
 Two things that are easy to trip on:
 
