@@ -154,10 +154,14 @@ note under Commands.
    the button is disabled client-side, and the update validator refuses the
    same thing server-side, so the gate holds against a curl as well as a click.
 
-6. **"Now watch step 4."** `submitting_to_core` shows `attempt 1`, then
-   `attempt 1: activity StartToClose timeout`, then attempt 2. In the Temporal
-   UI's Timeline these are two labelled rows: *Submit account request to core
-   banking (attempt 1)* and *(attempt 2)*.
+6. **"Now watch step 4 — in the Temporal UI."** The console shows
+   `submitting_to_core` and nothing more while the call is in flight; the retry
+   belongs to the activity's `RetryPolicy`, so the workflow is blocked in one
+   call and has nothing to report yet. The Temporal UI does: the pending
+   `open_account` shows its attempt number climbing and the last failure
+   underneath. Afterwards the history keeps the evidence — that activity's
+   started event carries `attempt: 2` and the timeout as its last failure, and
+   the console reports `Core attempts: 2`.
 
 7. **"How many accounts did we just open?"** `curl -s localhost:8001/ledger`
    → **one**. Then the payoff: *"The first call succeeded. We just never heard
@@ -173,7 +177,7 @@ Three, each triggerable on demand. The first is the headline; the other two are
 
 | Beat | How to trigger | What to point at |
 |---|---|---|
-| **Ambiguous timeout** | On by default; the *Slow first core-banking call* toggle in Demo Controls turns it **off** for a clean pass | Two attempts in the Timeline, one account in the ledger |
+| **Ambiguous timeout** | On by default; the *Slow first core-banking call* toggle in Demo Controls turns it **off** for a clean pass | The pending activity's attempt count in the Temporal UI, then `Core attempts: 2` and **one** account in the ledger |
 | **Worker kill** | `make restart-worker` during either durable wait | The case resumes exactly where it was, instantly |
 | **Model outage** | The *Model outage* toggle | `call_llm` fails; the agent loop retries and resumes mid-extraction rather than restarting it |
 

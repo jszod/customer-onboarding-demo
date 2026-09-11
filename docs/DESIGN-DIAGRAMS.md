@@ -115,13 +115,12 @@ sequenceDiagram
    The process carries on with the right account number, and the only trace is
    a second attempt in the record — which is the point: the incident happened
    and nobody had to handle it.
-5. **The retry is run by the process, not by the platform's activity policy.**
-   The obvious implementation is to let the activity retry itself, and it
-   works — but the attempt count and the last error then live inside a
-   mechanism nothing can read. Looping in the process makes both queryable, so
-   the console can show *"attempt 2, last error: timeout"* while it is
-   happening rather than after. Visibility during the failure is most of the
-   value of demonstrating one.
+5. **The retry is the platform's, and it leaves a record.** Nobody writes a
+   loop: the call is declared with a backoff policy and the platform re-runs
+   it. The evidence is not lost by being automatic — while it is in flight the
+   pending call shows its attempt number and the last failure, and afterwards
+   the recorded history keeps both on the one call that eventually answered.
+   That is the difference between a retry and a retry you can audit.
 6. **"Duplicate" on the *first* attempt means something else entirely.** Then
    no call of ours created the account — a previous onboarding did. The
    process stops there rather than carrying on: it opens nothing, sends the

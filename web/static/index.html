@@ -689,13 +689,16 @@ function renderDetail(st) {
                  (st.gaps || []).length ? "is-alert" : "is-done") +
             fact("Waiting", humanAge(st.pending_since) || "just now");
   } else if (s === "submitting_to_core") {
-    note = "The core banking system has not answered inside our 5-second timeout. " +
-           "We retry with the same idempotency key, so a slow first call cannot open a second account.";
-    facts = fact("Core attempt", st.core_attempt, st.core_attempt > 1 ? "is-alert" : "") +
-            fact("Idempotency key", WORKFLOW_ID);
-    if (st.last_error) {
-      err = '<div class="errline"><b>Last error</b> — ' + esc(st.last_error) + "</div>";
-    }
+    /* §13 / R-037. The retry is the activity's RetryPolicy, so the workflow is
+       blocked in one call and has nothing to report until it returns --
+       `core_attempt` is 0 here and `last_error` never arrives for a retryable
+       failure. Claiming an attempt count we do not have would be worse than
+       sending the operator to the surface that does have it. */
+    note = "Submitted with the idempotency key below. If the core system does not answer " +
+           "inside our 5-second timeout the platform retries with the same key, so a slow " +
+           "call cannot open a second account — watch the attempt count climb in the " +
+           "Temporal UI.";
+    facts = fact("Idempotency key", WORKFLOW_ID);
   } else if (s === "awaiting_client_id") {
     note = "The account request was accepted. We are asleep until the core system returns " +
            "the client ID — at zero cost, for as long as it takes.";

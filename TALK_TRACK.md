@@ -83,11 +83,12 @@ bank's system looks the key up, finds the account it already made, and answers
 "duplicate — here is the original." One account. The process carries on with
 the right number, and nobody downstream has to be told anything went wrong.
 
-Worth pointing at the screen while this happens: the console is showing
-*attempt 2* and the timeout error **as it happens**, not afterwards in a log.
-That is deliberate. The platform can retry the call for you, and if you let it,
-the attempt count and the error live somewhere nothing can read. Running the
-retry in the process itself puts both where the console can ask for them.
+Switch to the Temporal UI while this happens — this is the moment worth
+showing there rather than on the console. The platform is running the retry, so
+the platform is where you watch it: the pending call shows its attempt number
+climbing and the last failure underneath, without anyone having instrumented
+anything. The console catches up afterwards and reports how many attempts it
+took.
 
 Then the client ID comes back separately, whenever it comes back. That is the
 second wait, and it is why a core system that answers in seconds and one that

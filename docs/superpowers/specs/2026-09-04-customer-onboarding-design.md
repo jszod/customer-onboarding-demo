@@ -368,6 +368,7 @@ class OpenAccountRequest(BaseModel):
 class OpenAccountAck(BaseModel):
     request_id: str
     status: Literal["accepted", "duplicate"]
+    attempt: int = 1        # activity.info().attempt — which try answered (§10.1.1)
 
 class ClientIdAssignment(BaseModel):
     client_id: str
@@ -742,6 +743,20 @@ prevent.
 Slow-first-call is the **default** behaviour so the beat happens on every run;
 a console toggle disables it for a clean pass.
 
+**The retry is §10.2's activity `RetryPolicy`, and nothing else.** No
+workflow-level loop. An earlier build moved the retry into a `while True` in
+the workflow so the console could show the attempt count live; that was
+abandoned as more confusing than the visibility was worth — an implementer read
+§10.2, found `maximum_attempts=1` at the call site, and reasonably concluded
+retry had been disabled. See R-037, which supersedes R-015.
+
+The consequence is deliberate and worth stating: **the retry is watched in the
+Temporal UI, not in the console.** A pending activity's attempt number and last
+failure are something the platform already shows, natively, without being
+asked — which for a Temporal demo is the better place for them anyway. The
+console reports how many attempts it *took*, after the fact, from
+`OpenAccountAck.attempt`.
+
 **The beat fires once per ledger.** The idempotency key is the workflow ID,
 which §4.1 derives from the client key rather than a UUID — so it is the *same
 key on every run*. Core banking answers `duplicate` before it reaches the
@@ -755,10 +770,21 @@ ledger is cleared. `make demo` chains `demo-reset`; `make up` alone does not.
 `status: "duplicate"` is returned in two situations that the workflow can
 distinguish and must not conflate.
 
-| `core_attempt` | What happened | What it means |
-|---------------|---------------|---------------|
+| `ack.attempt` | What happened | What it means |
+|--------------|---------------|---------------|
 | **≥ 2** | Our own earlier call created the account; the answer was lost | §10.1's beat, working. Proceed. |
 | **1** | A **previous onboarding** for this client already owns the account | Nothing in this run created anything |
+
+**The attempt number comes back on the ack**, from `activity.info().attempt`
+inside the activity. With the retry owned by the activity's `RetryPolicy` the
+workflow cannot count attempts itself — it sees one call and one result — so
+the activity reports which attempt answered.
+
+This is **not** §10.1's trap. That trap is deriving the *idempotency key* from
+`activity.info().attempt`, which breaks the key's stability and produces the
+duplicate account the design exists to prevent. Reading the same value to
+*report* which attempt succeeded changes no behaviour and is the only way the
+two duplicate cases can be told apart once the loop is gone.
 
 The second case is reachable in business terms, not just as a demo artifact: a
 workflow ID of `onboarding-<client-key>` stops two *open* onboardings for one
@@ -904,9 +930,22 @@ rendering choice, not a contract change. A document-centric view (fields
 grouped by source document) was rejected — its provenance value is already
 carried by `FieldGap.documents_searched`, without building a document viewer.
 
-`submitting_to_core` is a **visible stage** showing `core_attempt` and
-`last_error`, so the headline retry is legible without switching to the
-Temporal UI.
+`submitting_to_core` is a **visible stage**, and once the call resolves the
+console reports `core_attempt` — how many tries it took, read off
+`OpenAccountAck.attempt`.
+
+**It does not show the retry while the retry is in flight, and that is a
+deliberate trade.** The retry belongs to the activity's `RetryPolicy` (§10.2),
+and an in-flight activity retry cannot be surfaced into a workflow query by any
+means — the workflow is blocked in one `execute_activity` call and knows
+nothing until it returns. An earlier build did drive the retry from a workflow
+loop to get exactly this, and the confusion it caused at the call site
+outweighed the gain (R-037, superseding R-015).
+
+**So the retry is narrated in the Temporal UI**, which shows a pending
+activity's attempt number and last failure without being asked. For a Temporal
+demo that is the stronger move: the platform is doing the work, so the platform
+is where you watch it happen. §14's runbook has the two tabs open regardless.
 
 **Refresh:** poll the `status` query every 2s. Queries are not recorded in
 history, so this is free. The `workflow_streams` contrib module is the

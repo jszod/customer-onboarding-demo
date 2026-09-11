@@ -5,7 +5,7 @@ stack. **Never hand-authored** — a hand-written history guards nothing.
 `tests/test_replay.py` replays every file here against the current workflow
 code; §16.5 calls that the highest-value gate in the suite.
 
-Captured: 2026-09-08
+Captured: 2026-09-11
 Capture ran with: `FIXTURE_MODE=1` (keyless, off the committed recording) — bring the worker up the same way (`make up` reads the
 same variables), or the run is not the one this file describes.
 

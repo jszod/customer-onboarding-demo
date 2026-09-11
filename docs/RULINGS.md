@@ -1817,3 +1817,115 @@ T-REPLAY scenarios pass with `histories/` untouched.
    came — so the test hung for 120s instead of failing. Rewritten to wait on
    the *stage* with a bounded `_wait_for`, it fails in 20s and names the stage
    it actually reached. Promoted to `.claude/rules/testing.md`.
+
+## R-037 — the core retry goes back to the activity's RetryPolicy; supersedes R-015
+
+**Asked for directly, after the confusion R-015 predicted in writing actually
+happened.** R-015 moved `open_account`'s retry out of §10.2's activity policy
+and into a `while True` in the workflow, so the console could show
+`core_attempt` and `last_error` while the retry was in flight. It worked. It is
+now reverted.
+
+**What R-015 got right, so this is not a reversal of a mistake.** The
+visibility was real, the curve it hand-rolled matched §10.2 exactly, and
+`test_the_timeout_is_visible_in_status_while_it_retries` proved the claim
+rather than asserting it. Judged on its own terms it succeeded.
+
+**Why it lost anyway.** It optimised the console at the cost of the call site,
+and the call site is what a reader reaches first. §10.2's table says "initial
+1s, backoff 2.0, max interval 10s, unlimited attempts"; the code said
+`retry_policy=RetryPolicy(maximum_attempts=1)`. R-015 named that exact hazard —
+*"an implementer reading §10.2 will expect a `RetryPolicy` here and find
+`maximum_attempts=1`, which reads like the retry was disabled"* — and shipped a
+comment as the mitigation. The comment was there, in full, pointing at R-015.
+It was not enough. **A comment explaining why code contradicts the spec is
+weaker than code that agrees with it.**
+
+**What is given up.** The console cannot show the retry while it happens. The
+workflow is blocked in one `execute_activity` and learns nothing until it
+returns; an in-flight activity retry cannot be surfaced into a query by any
+means. `core_attempt` is now reported *after* the fact, and `last_error` never
+arrives at all for a retryable failure. The console's `submitting_to_core`
+panel says so and points at the Temporal UI rather than showing a count it does
+not have.
+
+**Which is arguably the better demo.** The platform runs the retry, so the
+platform is where it is watched: a pending activity shows its attempt number
+and last failure natively, and the recorded history keeps `attempt: 2` and the
+timeout on the started event afterwards. Nothing was instrumented to get that.
+§13 and §10.1 now say this out loud instead of promising console visibility
+that no longer exists.
+
+**The trap, and it would have broken the happy path.** §10.1.1 distinguishes a
+duplicate on attempt 1 (a previous onboarding owns the account →
+`already_onboarded`) from one on attempt ≥ 2 (our own call landed, the answer
+was lost → proceed). That test read `self._core_attempt`, which stops existing
+here. Left alone, **every successful retry would report attempt 1, be read as a
+pre-existing account, and stop the workflow instead of completing it.** The
+replacement is `OpenAccountAck.attempt`, stamped by the activity from
+`activity.info().attempt`.
+
+Reading that value is safe. Deriving the **idempotency key** from it is §10.1's
+trap and produces the duplicate account the design prevents. The two are
+different uses of the same number and the spec now separates them explicitly.
+
+**Four things went wrong on the way, and each is worth more than the change.**
+
+1. **A test passed for the wrong reason, for the fourth time this build.**
+   Step 1 was meant to fail before the model gained its field. It passed:
+   Pydantic's `extra` defaults to `"ignore"`, so the stub's `attempt=2` was
+   silently dropped and the assertion was carried by the old loop's counter.
+   The plan's own prediction was wrong.
+2. **The workflow suite could not have caught the activity regressing.**
+   T-WF-07 and T-WF-10 both swap `open_account` for a stub, and the stubs stamp
+   `attempt` themselves — so deleting the line from the real activity left the
+   whole suite green while breaking every live retry. Proven by planting it.
+   `test_the_ack_reports_the_activity_attempt_number` is the only test that
+   covers it, and it exists because R-024's rule was re-read: stubs prove our
+   side of a contract, not the contract.
+3. **A source-grep guard fired on legitimate code — third instance.**
+   `test_key_is_never_derived_from_the_attempt_number` banned the word
+   "attempt" from the activity outright. It was a proxy for the real property,
+   and the proxy broke the moment §10.1.1 gave the activity a reason to read
+   the attempt number. Rewritten to assert the property on the wire: drive the
+   activity on attempts 1, 2 and 9 and the key must be byte-identical. Proven
+   by planting `f"{key}-{attempt}"` and watching it fail. `.claude/rules/`
+   already warned about grep guards twice; this is the third, and the fix is
+   the general lesson — assert the property, not its textual shadow.
+4. **A stale worker presented as an HTTP timeout.** The re-capture failed with
+   `httpx.ReadTimeout` on a status poll. The cause was a worker started 21
+   minutes before the model changed, still holding the old `OpenAccountAck`
+   class: `AttributeError: no attribute 'attempt'` failed the workflow task,
+   which retried forever, so the query could not be served and the HTTP client
+   gave up. `make demo`'s `pgrep` guard will not restart a worker that is
+   already up. Promoted to `stack-and-make.md`.
+
+And one mistake caught only by reading the log: the first successful re-capture
+ran against the **live API**, because `make restart-worker` does not inherit an
+inline `FIXTURE_MODE=1` given to a different target. §16.7 requires histories
+to be captured through the fixtures so the run is reproducible. Discarded and
+re-captured with the worker actually in `fixture_call_llm`, confirmed in
+`/tmp/onboarding-worker.log`.
+
+**The histories were re-captured, and that is correct exactly here.**
+`T-REPLAY-03` went red with *"Fail workflow machine does not handle this event:
+HistoryEvent(id: 33, TimerStarted)"* — the backoff timer the deleted loop
+created. The gate exists to catch an *unintended* command change; this task's
+purpose was an intended one. The diff on `timeout-retry.json` is exactly the
+loop's machinery and nothing else:
+
+| event | before | after |
+|---|---|---|
+| `activityTaskScheduled` | 5 | 4 |
+| `activityTaskTimedOut` | 1 | 0 |
+| `timerStarted` | 3 | 2 |
+| `timerFired` | 1 | 0 |
+| `workflowTask*` | 11 | 9 |
+| **total** | **62** | **51** |
+
+Eleven fewer events for the same business outcome. The retry survives as
+`attempt: 2` and a `lastFailure` on `open_account`'s started event, which is
+also why the README, `TALK_TRACK.md` and the design diagrams had to be
+corrected: they promised two labelled Timeline rows, and there is now one.
+
+Suite 234 passed, 0 skipped — one test removed, one added.

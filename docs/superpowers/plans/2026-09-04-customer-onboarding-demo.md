@@ -6354,6 +6354,209 @@ git commit -m "feat: already_onboarded — Task 24, §10.1.1"
 
 ---
 
+### Task 25: the core retry goes back to the activity's RetryPolicy — TAIL
+
+§10.1, §10.2, §10.1.1, §13. **Supersedes R-015.** The workflow-level retry loop
+was built so the console could show `core_attempt` and `last_error` live. It
+worked, and it cost more than it bought: reading §10.2 and then finding
+`maximum_attempts=1` at the call site reads as *retry disabled*. R-015 predicted
+that confusion in writing and it happened anyway, to the person who commissioned
+it. The comment pointing at R-015 was not enough.
+
+**What changes.** One `execute_activity` with §10.2's policy as written —
+initial 1s, backoff 2.0, max interval 10s, unlimited attempts. No `while True`,
+no `workflow.sleep` backoff, no `_core_attempt` increment.
+
+**What is given up, deliberately.** The console can no longer show the retry
+*while it happens*: the workflow is blocked in one call and knows nothing until
+it returns. An in-flight activity retry cannot be surfaced into a query by any
+means. The retry is narrated in the **Temporal UI**, which shows a pending
+activity's attempt and last failure natively — the better place for it in a
+Temporal demo. The console reports the attempt count afterwards.
+
+**The trap this task must not fall into.** §10.1.1 distinguishes a duplicate on
+attempt 1 (a previous onboarding owns the account → `already_onboarded`) from a
+duplicate on attempt ≥ 2 (our own call landed, the answer was lost → proceed).
+That test currently reads `self._core_attempt`, which stops existing here.
+**Without a replacement, every successful retry reads as attempt 1 and the
+workflow stops as `already_onboarded` instead of completing — the happy path
+breaks and T-WF-07 fails.** The replacement is `OpenAccountAck.attempt`,
+reported by the activity from `activity.info().attempt`.
+
+That is **not** §10.1's trap. The trap is deriving the *idempotency key* from
+the attempt number. Reading it to report which try answered changes no
+behaviour and is the only way the two cases stay distinguishable.
+
+**Files:**
+- Modify: `python/models/core_banking.py` — `OpenAccountAck.attempt: int = 1`
+- Modify: `python/activities/core_banking.py` — report `activity.info().attempt`
+- Modify: `python/workflows/onboarding.py` — delete the loop; keep the
+  `already_onboarded` branch, keyed on the ack
+- Modify: `web/static/index.html` — `Core attempt` becomes an after-the-fact
+  count; drop the live `last_error` promise on `submitting_to_core`
+- Test: `tests/test_core_submission.py` — T-WF-07 and T-WF-10 bodies, and
+  `test_the_timeout_is_visible_in_status_while_it_retries` **goes**, replaced by
+  one that asserts the attempt count arrives on the ack
+
+- [ ] **Step 1: Rewrite the two scenario bodies first, and watch them fail**
+
+T-WF-07 currently asserts `status["core_attempt"] >= 2` mid-flight. With the
+policy owning the retry it must assert on the *result*: `open_account` was
+invoked twice by the SDK, the key was identical both times, and the ack that
+came back carries `attempt == 2`.
+
+T-WF-10's stub must now return `attempt=1` with `status="duplicate"`, and
+T-WF-07's must return `attempt=2`. A stub that omits `attempt` defaults to 1,
+which would make every retry look pre-existing — the exact failure this task
+has to avoid, so assert it explicitly rather than relying on the default.
+
+Delete `test_the_timeout_is_visible_in_status_while_it_retries`. It pins
+behaviour this task deliberately removes; leaving it red or weakening it in
+place would both be worse than removing it and saying so in the commit.
+
+Run: `uv run pytest tests/test_manifest.py -k "T_WF_07 or T_WF_10" -q`
+
+**This prediction was wrong when the task ran, and the reason is worth
+knowing.** Both *passed*. Pydantic's `extra` defaults to `"ignore"`, so a stub
+constructing `OpenAccountAck(..., attempt=2)` against a model without the field
+has that kwarg **silently dropped** — and `core_attempt == 2` was then carried
+by the old loop's counter, not by the ack. A test that cannot fail is not a
+test (R-037).
+
+So do not trust this step to discriminate. Add the field, then prove the test
+earns its keep by removing it again and watching the test go red — and do the
+same for the activity's line, separately, because the workflow tests use a stub
+and cannot see the real activity at all.
+
+- [ ] **Step 2: Add the field**
+
+```python
+class OpenAccountAck(BaseModel):
+    request_id: str
+    status: Literal["accepted", "duplicate"]
+    attempt: int = 1        # activity.info().attempt — which try answered
+```
+
+Default 1 so every existing construction keeps working, including the nine
+committed histories, which recorded acks without it.
+
+- [ ] **Step 3: Report it from the activity**
+
+In `python/activities/core_banking.py`, on the success path only:
+
+```python
+    return OpenAccountAck(request_id=body["request_id"],
+                          status=body["status"],
+                          attempt=activity.info().attempt)
+```
+
+`activity.info().attempt` is 1-based and counts this activity's own retries.
+Reading it is safe; deriving the idempotency key from it is §10.1's trap and
+`tests/test_determinism_guard.py` greps for that expression in
+`open_account` — so do not name it in a comment there either
+(`.claude/rules/testing.md` has bitten twice on exactly that).
+
+- [ ] **Step 4: Delete the loop**
+
+Replace the whole `while True` with one call carrying §10.2's policy:
+
+```python
+        self._stage = "submitting_to_core"
+        self._track(req)
+        try:
+            ack: OpenAccountAck = await workflow.execute_activity(
+                "open_account",
+                OpenAccountRequest(
+                    # Stable across every retry. NEVER a retry counter -- that
+                    # is the trap in §10.1 and it produces exactly the
+                    # duplicate account this design prevents.
+                    idempotency_key=workflow.info().workflow_id,
+                    application=self._application),
+                result_type=OpenAccountAck,
+                start_to_close_timeout=timedelta(seconds=5),
+                # §10.2 as written. The retry is the platform's; the Temporal
+                # UI shows the attempt and the last failure while it runs,
+                # which is where this beat is narrated (§13, R-037).
+                retry_policy=RetryPolicy(
+                    initial_interval=timedelta(seconds=1),
+                    backoff_coefficient=2.0,
+                    maximum_interval=timedelta(seconds=10)),
+                summary="Submit account request to core banking")
+        except ActivityError as e:
+            cause = e.cause
+            if isinstance(cause, ApplicationError) and cause.non_retryable:
+                self._last_error = _failure_message(e)
+                return await self._finish(req, "rejected_by_core", None,
+                                          self._last_error)
+            raise
+
+        self._core_attempt = ack.attempt
+        self._core_request_id = ack.request_id
+        if ack.status == "duplicate":
+            self._core_duplicate = True
+            if ack.attempt == 1:
+                self._core_preexisting = True
+                return await self._finish(
+                    req, "already_onboarded", None,
+                    f"account {ack.request_id} already exists for this client "
+                    f"from an earlier onboarding; nothing was created and no "
+                    f"documents were sent")
+            workflow.logger.info(
+                "core banking returned duplicate on attempt %d -- the "
+                "idempotency key prevented a second account", ack.attempt)
+```
+
+`maximum_attempts` is left unset, which is unlimited — §10.2 requires that, and
+a core that answers in an hour is the normal case. The bare `raise` on a
+retryable exhaustion cannot be reached while attempts are unlimited; it is
+there so a future cap does not silently swallow the failure.
+
+- [ ] **Step 5: Run the two scenarios, then the whole suite**
+
+Run: `uv run pytest tests/test_manifest.py -k "T_WF_07 or T_WF_10" -q`
+Expected: 2 passed.
+
+Run: `make verify`
+Expected: `VERIFY OK: 23/23`, 233 passed — one fewer than before, because
+`test_the_timeout_is_visible_in_status_while_it_retries` is gone.
+
+- [ ] **Step 6: Prove the replay gate still holds**
+
+Run: `uv run pytest tests/test_manifest.py -k T_REPLAY -v`
+
+This is the step to slow down on. Deleting the loop **removes commands from
+the workflow's command sequence** — the timer that backed off between attempts,
+and the second activity scheduling. `histories/timeout-retry.json` recorded a
+run that had them. If that replay goes red it is telling the truth: the code no
+longer produces the history it produced when captured.
+
+**Then re-capture is correct, and this is the one case where it is.** The gate
+exists to catch an *unintended* command change; this task's whole purpose is an
+intended one. Re-capture with `FIXTURE_MODE=1 make up && make histories`, read
+the diff, and say in the commit which histories changed and why.
+
+- [ ] **Step 7: Update the console**
+
+`Core attempt` on `submitting_to_core` has nothing to read while the call is in
+flight — `core_attempt` is 0 until the ack lands. Drop it from that stage's
+facts and point at the Temporal UI instead; keep it on `complete`, where it
+now means "attempts used". Remove the live `last_error` line from
+`submitting_to_core`; a retryable failure never reaches the workflow any more.
+
+- [ ] **Step 8: Log the ruling and commit**
+
+R-037 supersedes R-015. Say what R-015 got right — the visibility was real and
+the test proved it — and why it lost anyway: it optimised for the console at
+the cost of the call site, and the call site is what an implementer reads
+first. Note that R-015's own predicted confusion is what killed it.
+
+```bash
+git add python/ web/static/index.html tests/ histories/ docs/
+git commit -m "refactor: the core retry is the activity's RetryPolicy again — R-037"
+```
+
+---
+
 ### Task 21: Final verification and the README — TAIL, sequential, runs AFTER Task 22
 
 **Files:**

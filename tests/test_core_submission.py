@@ -49,7 +49,14 @@ async def _to_core(env, queue):
 
 async def assert_timeout_then_duplicate_opens_exactly_one_account(env):
     """THE HEADLINE (§10.1). The activity times out while the service keeps
-    working; the retry carries the SAME key and gets `duplicate`."""
+    working; the SDK's RetryPolicy retries with the SAME key and gets
+    `duplicate`.
+
+    The retry belongs to §10.2's activity policy, so the workflow sees one call
+    and one result -- which is why the ack reports WHICH attempt answered
+    (§10.1.1). Asserting that is not decoration: `attempt == 1` on a duplicate
+    means a previous onboarding owns the account and the workflow must stop, so
+    a retry that reported 1 would break the happy path (R-037)."""
     seen_keys: list[str] = []
     calls = {"n": 0}
 
@@ -59,10 +66,10 @@ async def assert_timeout_then_duplicate_opens_exactly_one_account(env):
         calls["n"] += 1
         if calls["n"] == 1:
             # The service created the account and then failed to answer. Only
-            # needs to exceed the 5s start_to_close; the spec's 10s is the
-            # demo service's behaviour, not a requirement on this test.
+            # needs to exceed the 5s start_to_close.
             await asyncio.sleep(8)
-        return OpenAccountAck(request_id="REQ-ORIGINAL", status="duplicate")
+        return OpenAccountAck(request_id="REQ-ORIGINAL", status="duplicate",
+                              attempt=activity.info().attempt)
 
     stubs = Stubs()
     queue, worker = _worker_with(env, stubs, flaky)
@@ -71,43 +78,15 @@ async def assert_timeout_then_duplicate_opens_exactly_one_account(env):
         await _wait_for(handle, "awaiting_client_id", timeout=60)
         status = await handle.query("status")
 
-    assert calls["n"] == 2, "the activity must have retried"
+    assert calls["n"] == 2, "the activity retry policy must have retried"
     assert len(set(seen_keys)) == 1, "the idempotency key must be stable"
     assert seen_keys[0].startswith("onboarding-acme-corp")
     assert status["core_request_id"] == "REQ-ORIGINAL"
-    assert status["core_attempt"] >= 2
-
-
-async def test_the_timeout_is_visible_in_status_while_it_retries(env):
-    """§13 — the console reads `core_attempt` and `last_error` live. This is
-    the reason the retry is a workflow loop rather than the activity policy."""
-    calls = {"n": 0}
-
-    @activity.defn(name="open_account")
-    async def flaky(req: OpenAccountRequest) -> OpenAccountAck:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            await asyncio.sleep(8)
-        return OpenAccountAck(request_id="REQ-ORIGINAL", status="duplicate")
-
-    stubs = Stubs()
-    queue, worker = _worker_with(env, stubs, flaky)
-    async with worker:
-        handle = await _to_core(env, queue)
-        seen = None
-        for _ in range(300):
-            status = await handle.query("status")
-            if status["stage"] == "submitting_to_core" and status["last_error"]:
-                seen = status
-                break
-            if status["stage"] == "awaiting_client_id":
-                break
-            await asyncio.sleep(0.1)
-        await _wait_for(handle, "awaiting_client_id", timeout=60)
-
-    assert seen is not None, "the failed attempt never showed in status"
-    assert seen["core_attempt"] >= 1
-    assert "attempt 1" in seen["last_error"]
+    assert status["core_attempt"] == 2, \
+        "the ack must report which attempt answered, or a retry reads as a " \
+        "pre-existing account and the workflow stops instead of completing"
+    assert status["core_duplicate"] is True
+    assert status["core_preexisting"] is False
 
 
 async def assert_core_rejection_completes_as_rejected_by_core(env):
@@ -163,7 +142,9 @@ async def assert_first_attempt_duplicate_is_already_onboarded(env):
     @activity.defn(name="open_account")
     async def already_there(req: OpenAccountRequest) -> OpenAccountAck:
         calls["n"] += 1
-        return OpenAccountAck(request_id="REQ-PRIOR", status="duplicate")
+        # attempt 1: nothing in THIS run created the account (§10.1.1).
+        return OpenAccountAck(request_id="REQ-PRIOR", status="duplicate",
+                              attempt=activity.info().attempt)
 
     stubs = Stubs()
     queue, worker = _worker_with(env, stubs, already_there)
