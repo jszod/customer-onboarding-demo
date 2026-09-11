@@ -87,7 +87,7 @@ status:  ## 2 demo|which of the four processes are up, and on which ports
 	@$(ROOT)/demo.sh status
 
 logs:  ## 2 demo|tail all four process logs from .run/
-	tail -f $(ROOT)/.run/*.log
+	@$(ROOT)/demo.sh logs
 
 test:  ## 3 verify|run the suite, FIXTURE_MODE=1, no API key needed
 	cd $(ROOT) && FIXTURE_MODE=1 DEMO_STEP_MS=0 uv run pytest -v

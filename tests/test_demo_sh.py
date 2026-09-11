@@ -100,7 +100,8 @@ def test_make_delegates_rather_than_duplicating():
     demo.sh's VERBS tuple above has no such entry (R-038)."""
     mk = (ROOT / "make" / "common.mk").read_text()
     for target, verb in (("up", "up"), ("down", "down"), ("status", "status"),
-                         ("demo-reset", "reset"), ("restart-worker", "restart-worker")):
+                         ("demo-reset", "reset"), ("restart-worker", "restart-worker"),
+                         ("logs", "logs")):
         assert f"demo.sh {verb}" in mk, f"`make {target}` does not call demo.sh {verb}"
     assert not (ROOT / "make" / "start.sh").exists(), \
         "start.sh should have folded into demo.sh"

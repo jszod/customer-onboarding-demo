@@ -1961,3 +1961,21 @@ Both are cosmetic — no runtime behaviour changed, no coverage lost. Logged
 because the brief said "use this test verbatim" and "do not simplify" the
 measured facts, and both edits are visible departures from that verbatim text
 that a reviewer should be able to find the reasoning for in one place.
+
+**The third instance — found by review, not by me.** The task's code review
+caught a third self-contradiction of the same shape, in the same brief:
+Step 6's own recipe block wrote `logs:` as `tail -f $(ROOT)/.run/*.log`
+directly rather than `@$(ROOT)/demo.sh logs`, and `test_make_delegates_
+rather_than_duplicating`, as given, excluded `logs` from its verb list to
+accommodate exactly that duplication. I implemented both as given and did not
+flag it — a miss on my part, since it is the identical category of defect
+R-038 already names twice over: the plan's own supplied code contradicting
+the binding authority it was built to satisfy. §14.1 is unambiguous — "Every
+recipe in `make/common.mk` calls `demo.sh`, so there is one implementation and
+two ways to reach it" — and the spec outranks the plan where they conflict.
+The coordinator ruled the finding stands on that basis. Fixed in a follow-up
+commit: `logs:` now calls `@$(ROOT)/demo.sh logs` (its `## 2 demo|…`
+annotation unchanged), and `logs` was added into the delegation test's
+target/verb pairs rather than staying excluded. Covering tests
+(`tests/test_demo_sh.py tests/test_make.py`) re-run and green; the full suite
+was not re-run for a one-line change, per instruction.
