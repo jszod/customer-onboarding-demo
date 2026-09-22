@@ -2018,3 +2018,53 @@ watching the guard fail.
 
 §14.1 now states the distinction too, so the next person to write a Windows
 instruction does not have to rediscover it.
+
+## R-040 — the Windows path was run, and this is the extent of what that proves
+
+**Reported by the user, who ran it:** *"It runs with the bash scripts."* That
+one sentence retires the largest open risk in §14.1, and this entry exists
+because the risk was named in four places — the task, the final review, the
+ledger's deferred minors, and two PR descriptions — each saying it could only
+be settled on a real Windows machine. It has been. Recording it here so the
+next reader does not re-open a question that is now closed.
+
+**What is now known to work.** The demo runs from `demo.sh` on Windows. That
+exercises, at minimum, the things §14.1 could only reason about from macOS:
+
+- **`.gitattributes`'s `*.sh text eol=lf`** held. Had it not, the first command
+  would have returned `/bin/bash^M: bad interpreter` and nothing would have
+  run at all.
+- **`kill -0` liveness against a pid file** works under Git Bash's process
+  emulation. `cmd_up` refuses to print the URLs unless all four processes are
+  alive, so the stack coming up is evidence the check passes rather than
+  merely not crashing.
+- **`nohup … &` keeps `$!` as the port owner.** The venv interpreter is started
+  directly for this reason (measured on macOS; see the Task 26 plan), and a
+  console that responds means the gateway's pid was recorded correctly.
+- **`load_env()`** parsed a real `.env` without tripping `set -e` — the bug the
+  fix wave found and fixed.
+
+**What this does NOT establish, stated plainly so nobody over-reads it.** I did
+not witness the run and have no transcript. Unconfirmed:
+
+- whether `down` frees all three ports cleanly, and whether a second `up`
+  succeeds afterwards — the orphan proof, which on macOS is Step 10 of the task
+- `status` against a **stale** pid file, the failure mode PID files introduce
+- `restart-worker`, `logs`, and `reset`
+- the README's Windows install path end to end, in particular the manual
+  Temporal CLI download and `PATH` edit (R-039)
+
+**Ruling: this is enough to ship and not enough to stop testing.** The binding
+risk was "does the fundamental mechanism work on Windows at all", and the
+answer is yes. The rest are individual verbs that now fail *legibly* if they
+fail — `cmd_up` names the dead process and its log, and `.run/*.log` holds the
+reason — which is the property that made shipping acceptable in the first
+place. A future session should not treat the remaining list as blocking, and
+should not claim it as verified either.
+
+**The honest generalisation.** Four documents called this risk unverifiable
+from here and every one of them was right. The thing that closed it was a
+person running the software on the machine it was written for — the same way
+R-025, R-026, R-034, R-035 and R-036 were found. Six of the nine commits in
+PR #9 came from running the demo rather than from the suite, which was green
+throughout. That is now the most repeated lesson in this file.
