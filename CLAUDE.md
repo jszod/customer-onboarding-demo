@@ -47,11 +47,16 @@ own recipe), fixture mode died on the second model call of every real run
 (R-026), and four defects in the plan's own Task 20 code (R-027). Read those
 three before touching `make/`, `fixture_call_llm`, or the capture tool.
 
-**Where the work lives.** Branch `claude/next-work-item-imsbdj`, pushed, six
-commits ahead of `main`, no PR opened. Working tree clean. Local prerequisites
-are the README's Setup: the Temporal CLI (`make demo` and `make histories`
-shell out to it), `uv`, and **no API key** — the fixtures are committed, so
-`make verify` runs on a fresh clone as-is.
+**Where the work lives: `main`.** Everything is merged; there is no feature
+branch to find and no open PR. Local prerequisites are the README's Installing
+section: the Temporal CLI (`make demo` and `make histories` shell out to it),
+`uv`, and **no API key** — the fixtures are committed, so `make verify` runs on
+a fresh clone as-is.
+
+*A previous version of this block named a branch and a commit count. Do not
+reintroduce either: both rot within a day, and a handoff note that confidently
+states a stale fact is worse than one that says nothing. `git log
+origin/main..` answers it correctly whenever it is asked.*
 
 **`make/` changed shape after Task 20.** The root `Makefile` is now
 `include make/common.mk` rather than a rule forwarding nineteen target names to
