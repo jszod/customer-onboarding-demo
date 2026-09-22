@@ -135,9 +135,14 @@ cmd_up() {
   local py; py=$(venv_python)
 
   command -v temporal >/dev/null 2>&1 || {
-    echo "The Temporal CLI is not on PATH. See the README's Setup section:" >&2
-    echo "  macOS   brew install temporal" >&2
-    echo "  Windows winget install Temporal.Temporal" >&2
+    # No winget/Chocolatey/Scoop package exists for the Temporal CLI --
+    # https://docs.temporal.io/cli/setup-cli documents the manual download as
+    # the only Windows route. Naming a package manager here would send the
+    # customer to a command that fails.
+    echo "The Temporal CLI is not on PATH. See the README's Prerequisites:" >&2
+    echo "  macOS/Linux  brew install temporal" >&2
+    echo "  Windows      download, unzip, and add temporal.exe to your PATH:" >&2
+    echo "               https://temporal.download/cli/archive/latest?platform=windows&arch=amd64" >&2
     exit 1
   }
   spawn temporal temporal server start-dev --ui-port 8233

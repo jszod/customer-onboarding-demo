@@ -1979,3 +1979,42 @@ annotation unchanged), and `logs` was added into the delegation test's
 target/verb pairs rather than staying excluded. Covering tests
 (`tests/test_demo_sh.py tests/test_make.py`) re-run and green; the full suite
 was not re-run for a one-line change, per instruction.
+
+## R-039 — the README invented a winget package for the Temporal CLI
+
+**Found by the user, who checked the vendor's docs.** The README's
+prerequisites table and `demo.sh`'s CLI-missing error message both told the
+Windows customer to run `winget install Temporal.Temporal`. There is no such
+package. [Temporal's own install
+docs](https://docs.temporal.io/cli/setup-cli) document exactly one Windows
+route: download the archive from `temporal.download`, extract it, and add
+`temporal.exe` to `PATH`. No winget, no Chocolatey, no Scoop.
+
+This was the **customer's very first command**, and it would have failed with a
+package-not-found error that reads as his mistake rather than ours — before
+anything in the repo had a chance to work.
+
+**It was flagged as unverified twice and shipped anyway.** I wrote it into the
+plan while noting I could not confirm the id from macOS. The final whole-branch
+review independently raised it as a Minor, "cannot verify from diff". The
+ledger then carried it as a deferred minor with "must be confirmed before
+handoff". Three separate acknowledgements that the claim was unchecked, and it
+still reached a pushed PR describing it as the install route.
+
+The pattern worth extracting: **"cannot verify from here" is not a reason to
+write the claim down.** Either verify it, or write the thing that does not need
+verifying. Here the un-verifiable form ("run this command") had a verifiable
+alternative sitting right next to it ("download from this URL, which the vendor
+documents"), and I chose the former because it was tidier.
+
+`uv` is the opposite case and is correct: `astral-sh.uv` is a documented winget
+id, from [Astral's install
+docs](https://docs.astral.sh/uv/getting-started/installation/). A blanket ban on
+the word `winget` would have lost a right answer along with the wrong one, so
+`tests/test_readme.py` pins the distinction rather than the string: no invented
+Temporal id, the real download URL present, the CLI-missing message pointing at
+it, and `astral-sh.uv` retained. Proven by planting the invented id and
+watching the guard fail.
+
+§14.1 now states the distinction too, so the next person to write a Windows
+instruction does not have to rediscover it.

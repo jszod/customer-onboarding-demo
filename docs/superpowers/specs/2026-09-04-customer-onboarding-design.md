@@ -1266,6 +1266,16 @@ later, as the *next* `up` failing on a bound port. The script records the PID
 that owns the port, and the check is cycling `up`/`down` twice in a row rather
 than reading the code.
 
+**The Temporal CLI is a manual install on Windows, and the README must not
+pretend otherwise.** [Temporal's own docs](https://docs.temporal.io/cli/setup-cli)
+document exactly one Windows route — download the archive from
+`temporal.download`, extract it, and put `temporal.exe` on `PATH`. There is no
+winget, Chocolatey or Scoop package. An earlier draft of the README and of
+`demo.sh`'s error message both invented `winget install Temporal.Temporal`,
+which would have failed on the customer's very first command (R-039). `uv` does
+have a documented winget id, `astral-sh.uv`; the two are not the same case.
+`tests/test_readme.py` pins the distinction.
+
 **Windows keeps the Make-only targets it does not need.** `fixtures`,
 `histories` and `documents` stay Make-only: they need an API key and a live
 stack, the customer never calls them, and putting them in `demo.sh` doubles its

@@ -59,9 +59,18 @@ The same three things on every platform. Only the install command differs.
 
 | What | Why | macOS / Linux | Windows |
 |---|---|---|---|
-| **Temporal CLI** | One binary carrying both the dev server and the Web UI. Nothing starts without it | `brew install temporal` | `winget install Temporal.Temporal` |
-| **uv** | Dependencies, and it builds the virtualenv for you | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `winget install astral-sh.uv` |
+| **Temporal CLI** | One binary carrying both the dev server and the Web UI. Nothing starts without it | `brew install temporal` | **No package manager.** [Download](https://temporal.download/cli/archive/latest?platform=windows&arch=amd64), unzip, and put `temporal.exe` on your `PATH` — see below |
+| **uv** | Dependencies, and it builds the virtualenv for you | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `winget install --id=astral-sh.uv -e` |
 | **Python 3.12** | uv can manage this for you | usually already there | `winget install Python.Python.3.12` |
+
+**The Temporal CLI has no winget/Chocolatey/Scoop package** — [Temporal's own
+install docs](https://docs.temporal.io/cli/setup-cli) document exactly one route
+on Windows, and it is the manual one. Grab
+[amd64](https://temporal.download/cli/archive/latest?platform=windows&arch=amd64)
+or [arm64](https://temporal.download/cli/archive/latest?platform=windows&arch=arm64),
+extract the archive, and add the folder holding `temporal.exe` to your `PATH`.
+Reopen Git Bash afterwards so it picks the change up, then check `temporal
+--version` answers.
 
 Then check the version, because one number matters:
 
@@ -124,8 +133,10 @@ Git for Windows supplies both, and you need Git to clone this repo anyway. If
 `bash` is missing, install [Git for Windows](https://gitforwindows.org/) — not
 WSL. The point of `demo.sh` is that a full Linux subsystem is not required.
 
-**2. Install the [prerequisites](#prerequisites)** with the winget commands in
-that table, from Git Bash or PowerShell.
+**2. Install the [prerequisites](#prerequisites)** from that table — winget for
+uv and Python, and a manual download for the Temporal CLI, which has no
+package. Do the CLI first: it is the only one that needs a `PATH` edit and a
+fresh terminal.
 
 **3. Set up `.env`** as described [above](#the-api-key-and-running-without-one).
 Keyless is fine, and is the right way to start.
