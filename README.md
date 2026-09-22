@@ -4,6 +4,10 @@ A commercial bank onboards a new business client. The process is seven steps,
 one of which is AI. It runs on Temporal, and the point of the demo is what
 happens when things go wrong.
 
+**Setting up:** [macOS or Linux](#setup-on-macos-or-linux) ·
+[Windows](#setup-on-windows). After that everyone follows the same
+[walkthrough](#walking-the-demo).
+
 ## What this shows
 
 Three things, and the third is the one people remember.
@@ -49,78 +53,118 @@ Every failure path ends in a **business status**, never a failed workflow. A
 failed workflow reads as a bug; a completed one carrying `manual_intervention`,
 `rejected_by_core` or `already_onboarded` reads as a process.
 
-## Setup
+## Prerequisites
 
-Three things, in this order. Only the first is specific to this demo.
+The same three things on every platform. Only the install command differs.
 
-### 1. Temporal CLI
+| What | Why | macOS / Linux | Windows |
+|---|---|---|---|
+| **Temporal CLI** | One binary carrying both the dev server and the Web UI. Nothing starts without it | `brew install temporal` | **No package manager.** [Download](https://temporal.download/cli/archive/latest?platform=windows&arch=amd64), unzip, and put `temporal.exe` on your `PATH` — see below |
+| **uv** | Dependencies, and it builds the virtualenv for you | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `winget install --id=astral-sh.uv -e` |
+| **Python 3.12** | uv can manage this for you | usually already there | `winget install Python.Python.3.12` |
 
-`make demo` starts a local Temporal dev server by shelling out to
-`temporal server start-dev` (§14 of the spec — host processes, no Docker), so
-the CLI has to be on your `PATH` before anything else works. It ships as a
-single binary that bundles both the dev server and the Web UI.
+**The Temporal CLI has no winget/Chocolatey/Scoop package** — [Temporal's own
+install docs](https://docs.temporal.io/cli/setup-cli) document exactly one route
+on Windows, and it is the manual one. Grab
+[amd64](https://temporal.download/cli/archive/latest?platform=windows&arch=amd64)
+or [arm64](https://temporal.download/cli/archive/latest?platform=windows&arch=arm64),
+extract the archive, and add the folder holding `temporal.exe` to your `PATH`.
+Reopen Git Bash afterwards so it picks the change up, then check `temporal
+--version` answers.
 
-    brew install temporal
-
-Upgrading an existing install is `brew upgrade temporal`. On a machine without
-Homebrew, see the [Temporal CLI install
-docs](https://docs.temporal.io/cli/setup-cli).
-
-Then confirm the install, and the version floor with it:
+Then check the version, because one number matters:
 
     temporal --version
     # temporal version 1.8.3 (Server 1.31.2, UI 2.50.1)
 
-**The UI number is the one that matters.** §12 sets a floor of **UI v2.34.6**,
+**The UI number is the one to read.** §12 sets a floor of **UI v2.34.6**,
 because activity summaries on the Timeline — the thing that makes the Temporal
 UI read as the business process rather than as a stack trace — do not render
-below it. Any recent CLI clears that floor comfortably; if you are on an old
-install, upgrade rather than debugging a missing summary as a code bug.
+below it. Any recent CLI clears it comfortably. If yours does not, upgrade
+rather than debugging a missing summary as a code bug.
 
-You do not start the server by hand. `make demo` does it, guarded by `pgrep` so
-it is idempotent, and `make down` stops it. If the console comes up but nothing
-progresses, check `make status` first — a missing CLI shows up there as
-`temporal : stopped`, and the reason will be in `/tmp/onboarding-temporal.log`.
+### The API key, and running without one
 
-### 2. uv
+**You do not need a key.** The extraction fixtures are committed, and
+`FIXTURE_MODE=1` replays them instead of calling the model. The workflow, the
+child, the gaps and the escalation are all identical — the same code path, fed
+from `fixtures/acme-corp.json`. Every step is real except the model call.
 
-Dependencies are managed with [uv](https://docs.astral.sh/uv/); `make deps`
-runs `uv sync`.
+    cp .env.example .env
 
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+Leave `ANTHROPIC_API_KEY` blank and set `FIXTURE_MODE=1`. Put a real key on
+that line and drop `FIXTURE_MODE` when you want the live model.
 
-### 3. `ANTHROPIC_API_KEY` — only if you are re-recording fixtures
+`.env` is gitignored, optional, and `.env.example` lists every §17 knob with
+its default — the SLA timers and the demo pacing are discoverable in one place.
+**Both `make` and `demo.sh` read it**, so the knobs behave the same whichever
+front door you use. A value in `.env` beats one exported in your shell.
 
-The test suite runs keyless. Fixtures for the extraction loop are committed, and
-`make test` runs with `FIXTURE_MODE=1`, so a fresh clone can reach
-`make verify` with no API key at all.
+The suite never needs a key: `make test` and `make verify` force
+`FIXTURE_MODE=1` and never touch the network. A key is required for exactly two
+things — driving the demo against the live model, and re-recording fixtures
+with `make fixtures`.
 
-The key is needed for exactly two things: running the live demo (`make demo`),
-and re-recording the fixtures (`make fixtures`, which §16.7 calls the one
-prerequisite a human must supply, and only once).
+## Setup on macOS or Linux
 
-`FIXTURE_MODE=1 make demo` runs the whole stack keyless off the committed
-recording — the same path the suite takes, and the mode `make histories`
-captures in. Every step is real except the model call.
-
-    cp .env.example .env      # then put the key on the ANTHROPIC_API_KEY line
-
-`make` reads `.env` if it is there and exports it to the worker, gateway and
-core banking service. It is gitignored, it is optional — no file and no key
-still reaches `make verify` — and `.env.example` lists every §17 knob with its
-default, so the SLA timers and the demo profile are discoverable in one place.
-A plain `export ANTHROPIC_API_KEY=…` in your shell works just as well; note
-that a value in `.env` overrides it.
-
-## Quickstart
+You have `make`, so use it. Install the [prerequisites](#prerequisites), then:
 
     make deps
     make demo     # → console :8000, Temporal UI :8233, core banking :8001
     make verify   # the definition of done: green, and nothing skipped
 
-`histories/` holds the committed replay gate. Re-capture it with
-`FIXTURE_MODE=1 make up && make histories` only when the workflows' command
-sequence changes on purpose — `histories/README.md` says what that means.
+`make demo` starts four host processes (§14 — no Docker), each tracked by a pid
+file so the targets are idempotent, and `make down` stops them. If the console
+comes up but nothing progresses, run `make status` first: a missing CLI shows
+there as `temporal : stopped`, and the reason will be in `.run/temporal.log`.
+
+## Setup on Windows
+
+There is no `make` on Windows and you do not need one. `demo.sh` at the repo
+root is the entry point — one bash script, no make, and it runs unmodified on
+macOS and Linux too.
+
+**1. Check what you have.** Open Git Bash and run:
+
+    git --version
+    bash --version
+
+Git for Windows supplies both, and you need Git to clone this repo anyway. If
+`bash` is missing, install [Git for Windows](https://gitforwindows.org/) — not
+WSL. The point of `demo.sh` is that a full Linux subsystem is not required.
+
+**2. Install the [prerequisites](#prerequisites)** from that table — winget for
+uv and Python, and a manual download for the Temporal CLI, which has no
+package. Do the CLI first: it is the only one that needs a `PATH` edit and a
+fresh terminal.
+
+**3. Set up `.env`** as described [above](#the-api-key-and-running-without-one).
+Keyless is fine, and is the right way to start.
+
+**4. Run it:**
+
+    bash ./demo.sh up
+
+That single command installs dependencies on first use, so there is no separate
+setup step. Type `bash ./demo.sh up`, **not** `./demo.sh up` — Git on Windows
+does not reliably preserve the executable bit, and a bare `./demo.sh` can fail
+with a permission error that has nothing to do with the script.
+
+**5. Run the suite** the same way as anywhere else:
+
+    uv run pytest
+
+**6. Do not install `make`.** winget, Chocolatey and Scoop all give you GNU make
+*alone*, whose recipes then run under `cmd.exe` and fail on the first `rm -rf`
+— in a way that looks like a bug in this repo rather than a missing shell. Only
+MSYS2, Cygwin or WSL supply the POSIX tools Make needs underneath it, and each
+is a larger install than the demo itself.
+
+**7. WSL, if you want it anyway.** Everything here — `make` included — works
+untouched inside WSL, at the cost of a real Linux install and forwarding
+`:8000` and `:8233` out to your Windows browser. Reach for it only if you
+specifically want the developer-only targets in the
+[Commands](#commands) table.
 
 ## Walking the demo
 
@@ -128,8 +172,11 @@ Roughly four minutes. Two browser tabs: the console on `:8000`, the Temporal UI
 on `:8233`. Everything below has been walked end to end; the numbers are from a
 real run.
 
-**Before you start:** `make demo`, not `make up`. The reset matters — see the
-note under Commands.
+**Before you start**, reset first — the ambiguous-timeout beat fires once per
+ledger, and a stale ledger makes the toggle look broken:
+
+    make demo                 # macOS / Linux
+    bash ./demo.sh demo       # Windows, or anywhere
 
 1. **"Here is the case."** The console shows the client, seven steps, and
    *Not started*. Nothing is running yet; the page polls a workflow that does
@@ -145,10 +192,11 @@ note under Commands.
    searched. **Approve is disabled.** This is worth pausing on — the agent did
    not invent a date, and the workflow will not proceed without a human.
 
-4. **Kill the worker.** `make restart-worker`. The console keeps polling; the
-   workflow is asleep on a durable timer with nothing running. When the worker
-   returns, the case is exactly where it was. *"The process outlived the
-   process running it."*
+4. **Kill the worker** — `make restart-worker`, or
+   `bash ./demo.sh restart-worker`. The console keeps polling; the workflow is
+   asleep on a durable timer with nothing running. When the worker returns, the
+   case is exactly where it was. *"The process outlived the process running
+   it."*
 
 5. **Fill the date, tick the attestation, Approve.** Both are enforced twice —
    the button is disabled client-side, and the update validator refuses the
@@ -178,7 +226,7 @@ Three, each triggerable on demand. The first is the headline; the other two are
 | Beat | How to trigger | What to point at |
 |---|---|---|
 | **Ambiguous timeout** | On by default; the *Slow first core-banking call* toggle in Demo Controls turns it **off** for a clean pass | The pending activity's attempt count in the Temporal UI, then `Core attempts: 2` and **one** account in the ledger |
-| **Worker kill** | `make restart-worker` during either durable wait | The case resumes exactly where it was, instantly |
+| **Worker kill** | `make restart-worker` / `bash ./demo.sh restart-worker`, during either durable wait | The case resumes exactly where it was, instantly |
 | **Model outage** | The *Model outage* toggle | `call_llm` fails; the agent loop retries and resumes mid-extraction rather than restarting it |
 
 A fourth, if someone asks *"what if we onboard the same client twice?"*: submit
@@ -187,58 +235,47 @@ attempt, which means a previous onboarding owns the account — so the workflow
 stops at `already_onboarded`, sends no welcome pack, and notifies the
 specialist and supervisor rather than the client.
 
-## Running it without an API key
-
-`FIXTURE_MODE=1` replays a committed recording of the extraction instead of
-calling the model. The workflow, the child, the gaps and the escalation are all
-identical — it is the same code path, driven from `fixtures/acme-corp.json`.
-
-    FIXTURE_MODE=1 make demo     # the whole demo, keyless
-    make verify                  # always keyless; the suite forces it
-
-`make test` and `make verify` force `FIXTURE_MODE=1` and never touch the
-network, so a fresh clone reaches a green suite with no key at all. A key is
-needed for exactly two things: driving the demo live, and re-recording the
-fixtures with `make fixtures`.
-
 ## Commands
 
-**`make help`** prints this list, and it is generated from the targets
-themselves rather than maintained by hand, so it cannot fall behind
-`make/common.mk`. The table below is the same content for reading on the web.
+Two front doors, one implementation. **Wherever a row below has both columns
+filled, the `make` recipe calls `demo.sh`** — there is one behaviour and two
+ways to reach it, so the columns cannot drift apart. **`make help`** prints the
+left column and is generated from the targets themselves.
 
-| | |
-|---|---|
-| **Setup** | |
-| `make deps` | `uv sync` — install everything |
-| **Running the demo** | |
-| `make demo` | reset state, start all four processes, print the URLs |
-| `make up` | start them *without* resetting — keeps the ledger, so the ambiguous-timeout beat will not re-fire |
-| `make down` | stop everything this Makefile started |
-| `make status` | which of the four processes are up, and on which ports |
-| `make logs` | tail all four process logs from `/tmp` |
-| `make demo-reset` | clear the ledger, outbox, document store and outage flag |
-| `make restart-worker` | the worker-kill beat — prove the workflow survives it |
-| **Verifying** | |
-| `make test` | run the suite under `FIXTURE_MODE=1`; no API key needed |
-| `make verify` | the definition of done: green **and** nothing skipped |
-| **Rebuilding inputs** | |
-| `make documents` | regenerate the sample PDFs under `documents/` |
-| `make fixtures` | re-record `fixtures/` against the live model (needs a key) |
-| `make histories` | re-capture `histories/`, the replay gate's input |
-| `make clean` | `down` + `demo-reset` |
+| Make | `demo.sh` | What it does |
+|---|---|---|
+| `make deps` | *(automatic)* | `uv sync`. `demo.sh up` does this itself on first run |
+| `make demo` | `bash ./demo.sh demo` | reset state, start all four processes, print the URLs |
+| `make up` | `bash ./demo.sh up` | start them *without* resetting — keeps the ledger, so the ambiguous-timeout beat will not re-fire |
+| `make down` | `bash ./demo.sh down` | stop everything it started |
+| `make status` | `bash ./demo.sh status` | which of the four processes are up |
+| `make logs` | `bash ./demo.sh logs` | tail all four process logs from `.run/` |
+| `make demo-reset` | `bash ./demo.sh reset` | clear state so you can Submit again — **no restart needed** |
+| `make restart-worker` | `bash ./demo.sh restart-worker` | the worker-kill beat |
+| `make test` | `uv run pytest` | the suite, under `FIXTURE_MODE=1`; no key needed |
+| `make verify` | — | `test` plus the zero-skipped gate: the definition of done |
+| `make documents` | — | regenerate the sample PDFs |
+| `make fixtures` | — | re-record `fixtures/` against the live model (needs a key) |
+| `make histories` | — | re-capture `histories/`, the replay gate's input |
+| `make clean` | — | `down` + `reset` |
+
+The four with no `demo.sh` column are developer-only: they need an API key, a
+live stack, or both, and the customer path never calls them.
 
 Two things that are easy to trip on:
 
-- **A bare `make` runs `up`**, not `help` — `.DEFAULT_GOAL := up`, because
-  these verbs exist for muscle memory across the sibling demos (§14).
-- **`make up` does not reset the ledger**, and the idempotency key is derived
-  from the client key rather than a UUID (§4.1). So the ambiguous-timeout beat
-  fires once per ledger: core banking answers `duplicate` before it reaches its
-  delay, and the "Slow first core-banking call" toggle then looks broken. Use
-  `make demo`, which chains `demo-reset`. A second onboarding for a client who
-  already has an account now terminates as `already_onboarded` and says so
-  (§10.1.1).
+- **A bare `make` runs `up`**, not `help` — `.DEFAULT_GOAL := up`, because these
+  verbs exist for muscle memory across the sibling demos (§14).
+- **`up` does not reset the ledger**, and the idempotency key is derived from
+  the client key rather than a UUID (§4.1). So the ambiguous-timeout beat fires
+  once per ledger: core banking answers `duplicate` before it reaches its delay,
+  and the *Slow first core-banking call* toggle then looks broken. Use `demo`,
+  which chains the reset. A second onboarding for a client who already has an
+  account terminates as `already_onboarded` and says so (§10.1.1).
+
+`histories/` holds the committed replay gate. Re-capture it with
+`FIXTURE_MODE=1 make up && make histories` only when the workflows' command
+sequence changes on purpose — `histories/README.md` says what that means.
 
 ## Talking through it without running it
 
@@ -268,7 +305,7 @@ Written in that order, and the spec wins where they disagree.
 | Document | What it is |
 |----------|------------|
 | [`docs/superpowers/specs/2026-09-04-customer-onboarding-design.md`](docs/superpowers/specs/2026-09-04-customer-onboarding-design.md) | **The binding authority.** 22 sections; settles everything. |
-| [`docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md`](docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md) | 24 tasks. How the spec gets built. |
+| [`docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md`](docs/superpowers/plans/2026-09-04-customer-onboarding-demo.md) | 26 tasks. How the spec gets built. |
 | [`docs/RULINGS.md`](docs/RULINGS.md) | The execution log — every deviation from the plan, with its reasoning. Most of the interesting bugs are in here. |
 | [`docs/demo-brief.md`](docs/demo-brief.md) | 11 numbered decisions, with the **rejected** alternatives. |
 | [`docs/DEVELOPMENT-PROCESS.md`](docs/DEVELOPMENT-PROCESS.md) | The four-stage process this repo follows. |

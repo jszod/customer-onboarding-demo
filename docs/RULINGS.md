@@ -1929,3 +1929,92 @@ also why the README, `TALK_TRACK.md` and the design diagrams had to be
 corrected: they promised two labelled Timeline rows, and there is now one.
 
 Suite 234 passed, 0 skipped — one test removed, one added.
+
+## R-038 — `demo.sh`'s own header named the tool it forbids; and a test in the
+task brief checked a verb that does not exist
+
+Task 26. Two small conflicts inside the task's own supplied text, both
+resolved the same way: keep the mechanism, adjust the wording to describe it
+without breaking the gate that reads the wording.
+
+**The comment.** `demo.sh`'s header, as given, explained that liveness is
+`kill -0` against a recorded pid "never `pgrep`", and that `pgrep -f` is what
+cost R-001 and R-025. `tests/test_demo_sh.py::test_no_pgrep_or_pkill_anywhere`
+greps `demo.sh` itself for the literal string `pgrep` — and `.claude/rules/
+testing.md` has already named this trap once: *"A test that greps source makes
+the prose in that file part of the test."* Reworded the two sentences to name
+the hazard ("a command-line-search tool") without spelling the forbidden
+command, keeping the same meaning. No functional change.
+
+**The test.** `test_make_delegates_rather_than_duplicating`, as given, looped
+`("up", "down", "status", "demo-reset", "restart-worker")` and asserted
+`f"demo.sh {verb}"` for each — assuming the make target name and the demo.sh
+verb are identical. They are not: `demo.sh`'s verb list (also given, in the
+same file, as `VERBS`) has no `demo-reset` entry, only `reset` — and Step 6's
+own supplied recipe correctly calls `demo.sh reset` under the `demo-reset:`
+target. Followed the working code over the assertion: changed the loop to map
+`demo-reset` -> `reset` explicitly rather than inventing a `demo-reset` verb
+that every other part of the brief (the VERBS tuple, the usage text, Step 3's
+`case`) says does not exist.
+
+Both are cosmetic — no runtime behaviour changed, no coverage lost. Logged
+because the brief said "use this test verbatim" and "do not simplify" the
+measured facts, and both edits are visible departures from that verbatim text
+that a reviewer should be able to find the reasoning for in one place.
+
+**The third instance — found by review, not by me.** The task's code review
+caught a third self-contradiction of the same shape, in the same brief:
+Step 6's own recipe block wrote `logs:` as `tail -f $(ROOT)/.run/*.log`
+directly rather than `@$(ROOT)/demo.sh logs`, and `test_make_delegates_
+rather_than_duplicating`, as given, excluded `logs` from its verb list to
+accommodate exactly that duplication. I implemented both as given and did not
+flag it — a miss on my part, since it is the identical category of defect
+R-038 already names twice over: the plan's own supplied code contradicting
+the binding authority it was built to satisfy. §14.1 is unambiguous — "Every
+recipe in `make/common.mk` calls `demo.sh`, so there is one implementation and
+two ways to reach it" — and the spec outranks the plan where they conflict.
+The coordinator ruled the finding stands on that basis. Fixed in a follow-up
+commit: `logs:` now calls `@$(ROOT)/demo.sh logs` (its `## 2 demo|…`
+annotation unchanged), and `logs` was added into the delegation test's
+target/verb pairs rather than staying excluded. Covering tests
+(`tests/test_demo_sh.py tests/test_make.py`) re-run and green; the full suite
+was not re-run for a one-line change, per instruction.
+
+## R-039 — the README invented a winget package for the Temporal CLI
+
+**Found by the user, who checked the vendor's docs.** The README's
+prerequisites table and `demo.sh`'s CLI-missing error message both told the
+Windows customer to run `winget install Temporal.Temporal`. There is no such
+package. [Temporal's own install
+docs](https://docs.temporal.io/cli/setup-cli) document exactly one Windows
+route: download the archive from `temporal.download`, extract it, and add
+`temporal.exe` to `PATH`. No winget, no Chocolatey, no Scoop.
+
+This was the **customer's very first command**, and it would have failed with a
+package-not-found error that reads as his mistake rather than ours — before
+anything in the repo had a chance to work.
+
+**It was flagged as unverified twice and shipped anyway.** I wrote it into the
+plan while noting I could not confirm the id from macOS. The final whole-branch
+review independently raised it as a Minor, "cannot verify from diff". The
+ledger then carried it as a deferred minor with "must be confirmed before
+handoff". Three separate acknowledgements that the claim was unchecked, and it
+still reached a pushed PR describing it as the install route.
+
+The pattern worth extracting: **"cannot verify from here" is not a reason to
+write the claim down.** Either verify it, or write the thing that does not need
+verifying. Here the un-verifiable form ("run this command") had a verifiable
+alternative sitting right next to it ("download from this URL, which the vendor
+documents"), and I chose the former because it was tidier.
+
+`uv` is the opposite case and is correct: `astral-sh.uv` is a documented winget
+id, from [Astral's install
+docs](https://docs.astral.sh/uv/getting-started/installation/). A blanket ban on
+the word `winget` would have lost a right answer along with the wrong one, so
+`tests/test_readme.py` pins the distinction rather than the string: no invented
+Temporal id, the real download URL present, the CLI-missing message pointing at
+it, and `astral-sh.uv` retained. Proven by planting the invented id and
+watching the guard fail.
+
+§14.1 now states the distinction too, so the next person to write a Windows
+instruction does not have to rediscover it.

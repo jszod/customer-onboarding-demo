@@ -41,8 +41,8 @@ THIS_MK := $(lastword $(MAKEFILE_LIST))
 # (a `DEMO_STEP_MS=2500` in `.env` took `make verify` from 32s to 2m35s).
 -include $(ROOT)/.env
 export
-.PHONY: up down status logs demo demo-reset temporal gateway core-banking \
-        worker kill-worker restart-worker test verify fixtures histories documents clean deps
+.PHONY: up down status logs demo demo-reset restart-worker test verify \
+        fixtures histories documents clean deps
 
 # Generated, not maintained: every `## N group|description` below becomes a row.
 # The leading digit orders the groups setup -> demo -> verify -> build rather
@@ -62,52 +62,32 @@ help:
 deps:  ## 1 setup|uv sync — install everything
 	cd $(ROOT) && uv sync
 
-up: temporal core-banking gateway worker  ## 2 demo|start Temporal, core banking, gateway and worker (no reset)
-	@echo ""
-	@echo "  console      → http://localhost:8000"
-	@echo "  temporal UI  → http://localhost:8233"
-	@echo "  core banking → http://localhost:8001/ledger"
+up:  ## 2 demo|start Temporal, core banking, gateway and worker (no reset)
+	@$(ROOT)/demo.sh up
 
 demo: demo-reset up  ## 2 demo|reset state, start all four processes, print the URLs
 	@echo "  ready — click Submit on the console"
 
-# The four start targets delegate to one script, and that indirection is the
-# whole point: a recipe that greps for `[t]emporal server start-dev` while also
-# CONTAINING `temporal server start-dev` matches its own shell, so the guard
-# always said "already running" and `make up` started nothing. R-001 fixed the
-# pattern; the start command needed a file to live in. See R-025 and
-# make/start.sh.
-temporal:
-	@$(ROOT)/make/start.sh temporal
+# `.llm_down` is the §10.4 outage toggle. It sits beside `.store` rather than
+# inside it (the flag path is DOCUMENT_STORE's PARENT, which defaults to the
+# repo root), so `rm -rf .store` does not take it -- and an outage toggled on
+# during one demo would still be on at the start of the next.
+demo-reset:  ## 2 demo|clear state so you can Submit again — no restart needed
+	@$(ROOT)/demo.sh reset
 
-core-banking:
-	@$(ROOT)/make/start.sh core-banking
+clean: down demo-reset  ## 4 build|down + demo-reset
 
-gateway:
-	@$(ROOT)/make/start.sh gateway
+restart-worker:  ## 2 demo|the worker-kill beat: prove the workflow survives it
+	@$(ROOT)/demo.sh restart-worker
 
-worker:
-	@$(ROOT)/make/start.sh worker
-
-kill-worker:
-	-pkill -f "[p]ython.worker"
-	@echo "worker killed — the workflow survives this. restart with: make worker"
-
-restart-worker: kill-worker worker  ## 2 demo|the worker-kill beat: prove the workflow survives it
-
-down: kill-worker  ## 2 demo|stop everything this Makefile started
-	-pkill -f "[w]eb.gateway:app"
-	-pkill -f "[c]ore_banking.app:app"
-	-pkill -f "[t]emporal server start-dev"
+down:  ## 2 demo|stop everything this Makefile started
+	@$(ROOT)/demo.sh down
 
 status:  ## 2 demo|which of the four processes are up, and on which ports
-	@printf "temporal     : "; pgrep -f "[t]emporal server start-dev" >/dev/null 2>&1 && echo "running (:7233, UI :8233)" || echo "stopped"
-	@printf "core banking : "; pgrep -f "[c]ore_banking.app:app" >/dev/null 2>&1 && echo "running (:8001)" || echo "stopped"
-	@printf "gateway      : "; pgrep -f "[w]eb.gateway:app" >/dev/null 2>&1 && echo "running (:8000)" || echo "stopped"
-	@printf "worker       : "; pgrep -f "[p]ython.worker" >/dev/null 2>&1 && echo "running" || echo "stopped"
+	@$(ROOT)/demo.sh status
 
-logs:  ## 2 demo|tail all four process logs from /tmp
-	tail -f /tmp/onboarding-*.log
+logs:  ## 2 demo|tail all four process logs from .run/
+	@$(ROOT)/demo.sh logs
 
 test:  ## 3 verify|run the suite, FIXTURE_MODE=1, no API key needed
 	cd $(ROOT) && FIXTURE_MODE=1 DEMO_STEP_MS=0 uv run pytest -v
@@ -143,13 +123,3 @@ fixtures:  ## 4 build|re-record fixtures/ against the live model (needs a key)
 histories:  ## 4 build|re-capture histories/ from a live run (replay gate input)
 	cd $(ROOT) && FIXTURE_MODE=$${FIXTURE_MODE:-1} uv run python tools/capture_histories.py
 
-# `.llm_down` is the §10.4 outage toggle. It sits beside `.store` rather than
-# inside it (the flag path is DOCUMENT_STORE's PARENT, which defaults to the
-# repo root), so `rm -rf .store` does not take it -- and an outage toggled on
-# during one demo would still be on at the start of the next.
-demo-reset:  ## 2 demo|clear the ledger, outbox, document store and LLM-outage flag
-	rm -rf $(ROOT)/.store $(ROOT)/outbox $(ROOT)/core_banking/ledger.db \
-	       $(ROOT)/.llm_down
-	@echo "application state cleared"
-
-clean: down demo-reset  ## 4 build|down + demo-reset

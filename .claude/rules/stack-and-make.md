@@ -28,33 +28,31 @@ Two consequences worth knowing:
 - **`.DEFAULT_GOAL := up` lives in `common.mk`.** An include contributes no
   first target to inherit as the default, and the first target here is `deps`.
 
-## A `pgrep` guard must not share a command line with the command it guards
+## The command-line-matching guard is retired — Task 26 replaced it with pid files
 
-`pgrep -f` matches **whole command lines**, and a recipe is a command line. A
-recipe that both greps for a pattern and contains the command it would start
-matches its own shell:
-
-```make
-# BROKEN — the guard finds itself, every time
-@pgrep -f "[t]emporal server start-dev" >/dev/null 2>&1 || \
-	(nohup temporal server start-dev --ui-port 8233 > /tmp/x.log 2>&1 &)
-```
-
-The bracket idiom (`[t]emporal`) stops the *pattern* from self-matching. It
-does nothing about the start command sitting three words later in the same
-line. No regex fixes this — anything that matches the real process matches the
-text that starts it — and Make expands variables before the shell runs, so
-splitting the literal does not help either.
-
-**So the start command lives in `make/start.sh`, one `case` arm per process,
-and the recipe just calls it.** A file's contents are not a command line: the
-script runs as `sh make/start.sh temporal`, which no guard matches.
+This section used to describe a whole-command-line-matching guard (a `case`
+arm per process in `make/start.sh`) that stopped the guard from matching its
+own recipe. That hazard is gone by construction now, not by carefulness: every
+process target is `@$(ROOT)/demo.sh <verb>`, and `demo.sh` tracks liveness with
+a recorded pid in `.run/<name>.pid`, checked with `kill -0`, never by scanning
+command lines. There is no pattern to self-match because there is no pattern.
 
 This has happened twice — R-001 (`make status` reported four running processes
 in a container with no Temporal CLI installed) and R-025 (`make up` started
 nothing and printed the URLs anyway, found only when Task 20 needed a live
 stack). The second one hid for eight tasks because the first one's fix was
-verified with `make status`, whose recipe has no start command in it.
+verified with `make status`, whose recipe had no start command in it.
+`make/start.sh` (R-025's fix) is itself gone as of Task 26 — its reason for
+existing, giving the start command a file to live in so no guard's command
+line could contain it, is moot once nothing greps command lines at all. See
+R-038 and `demo.sh`'s own header comment for the two facts that replaced it:
+the venv interpreter is started directly (never through `uv run`, which forks
+a child that owns the port `$!` does not record), and `nohup` is what keeps
+`$!` correct.
+
+Windows-under-Git-Bash is why command-line scanning could never have come
+back: that shell has no procps, so the tool the old guard depended on does not
+exist there at all.
 
 ## Verify a process target by asking the system, not the recipe
 
@@ -62,14 +60,15 @@ A start target that prints "started" has proved nothing. The check is:
 
 ```
 make up && sleep 5 && make status      # then look at the log
-tail /tmp/onboarding-worker.log        # "worker polling customer-onboarding"
+tail .run/worker.log                   # "worker polling customer-onboarding"
 curl -s localhost:8001/ledger          # the service answers
 ```
 
-`make status` is a genuinely independent reading — its recipe contains only the
-bracketed patterns — and the log says which mode the worker came up in
-(`call_llm implementation: fixture_call_llm`), which is the other thing that
-silently changes what a run means.
+`make status` is a genuinely independent reading — it asks the OS whether the
+recorded pid is alive, not whether the recipe printed something — and the log
+says which mode the worker came up in (`call_llm implementation:
+fixture_call_llm`), which is the other thing that silently changes what a run
+means.
 
 ## 23 tests erroring at setup is one fixture, and it is the machine
 
@@ -132,10 +131,11 @@ reaches nothing else.
 
 ## A stale worker presents as an HTTP timeout, not as stale code
 
-`make up` and `make demo` guard the worker with `pgrep`, so **they will not
-restart a worker that is already running** — by design, the guard is what makes
-the targets idempotent. The cost is that a worker keeps the classes it imported
-at startup. Change a model and the running worker still holds the old one.
+`make up` and `make demo` guard the worker with a recorded pid, so **they will
+not restart a worker that is already running** — by design, the guard is what
+makes the targets idempotent. The cost is that a worker keeps the classes it
+imported at startup. Change a model and the running worker still holds the
+old one.
 
 The symptom is not an import error. In R-037 a worker predating an added field
 raised `AttributeError: 'OpenAccountAck' object has no attribute 'attempt'`,
@@ -148,12 +148,12 @@ After editing anything under `python/`, `make restart-worker`. If a stack
 behaves as though your change is not there, check the worker's start time
 against the file's mtime before debugging the code:
 
-    ps -o lstart= -p $(pgrep -f '[p]ython.worker')
+    ps -o lstart= -p $(cat .run/worker.pid)
     stat -f '%Sm' python/models/whatever.py
 
 **And pass the mode to the target that starts the worker.** `FIXTURE_MODE=1
 make histories` sets it for the capture tool, not for the worker a separate
 `make restart-worker` just started — that one came up live. R-037 captured a
 whole set of histories against the real API that way. `grep 'call_llm
-implementation' /tmp/onboarding-worker.log` is the one-line check, and it is
-worth running before every capture.
+implementation' .run/worker.log` is the one-line check, and it is worth
+running before every capture.

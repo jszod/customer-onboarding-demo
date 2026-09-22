@@ -1,0 +1,5 @@
+# Shell scripts MUST stay LF. Git for Windows defaults to core.autocrlf=true,
+# which would rewrite demo.sh with CRLF on clone -- and the customer's first
+# command would return `/bin/bash^M: bad interpreter: No such file or
+# directory`, before anything works, looking like a defect in this repo. §14.1.
+*.sh text eol=lf

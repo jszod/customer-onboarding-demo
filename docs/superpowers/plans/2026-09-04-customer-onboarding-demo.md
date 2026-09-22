@@ -6557,6 +6557,471 @@ git commit -m "refactor: the core retry is the activity's RetryPolicy again — 
 
 ---
 
+### Task 26: `demo.sh` — the entry point that assumes nothing — TAIL
+
+§14.1, §15, §2's fourth audience. The repo is being handed to a customer who
+runs it himself on Windows with no `make`. One bash script serves every
+platform; `make` keeps working by calling it.
+
+**Files:**
+- Create: `demo.sh` (repo root), `.gitattributes`
+- Modify: `make/common.mk` — every process recipe becomes a call
+- Delete: `make/start.sh` — folds in; its reason for existing was the pgrep bug
+- Modify: `.gitignore` — add `.run/`
+- Modify: `README.md` — a Windows section
+- Modify: `.claude/rules/stack-and-make.md` — the pgrep rule is superseded, and
+  the log paths move
+- Test: `tests/test_demo_sh.py`
+
+**Interfaces:**
+- Consumes: nothing
+- Produces: `bash ./demo.sh up|down|status|reset|restart-worker`, and
+  `.run/<name>.pid` / `.run/<name>.log` for each of the four processes
+
+**Three facts established by measurement before this task was written. Do not
+re-derive them, and do not "simplify" past them.**
+
+1. **`uv run` forks a child, and the child holds the port.** Measured: `uv`
+   at pid 17203, python at 17206 with ppid 17203, and `lsof -ti :8099`
+   returned **17206**. So `$!` after `uv run uvicorn … &` records *uv*, and
+   killing it orphans the python still bound to the port — surfacing one step
+   later as the next `up` failing on a bound port.
+2. **Starting the venv interpreter directly fixes it at the source.** Measured:
+   `.venv/bin/python -m uvicorn … &` gave `$!` = 17255, and `lsof -ti :8099`
+   returned **17255** — the same pid. `kill $!` freed the port. One process,
+   no tree, nothing to hunt.
+3. **`nohup cmd &` keeps `$!` correct**, because `nohup` `exec`s the command
+   rather than forking it. Use it: a background job losing its terminal is the
+   one thing a customer will do by accident.
+
+The interpreter lives at `.venv/bin/python` on macOS and Linux and
+`.venv/Scripts/python.exe` on Windows. The script probes for both.
+
+**`demo` and `logs` are verbs, not just Make targets.** The first draft of this
+task had five verbs and left the customer typing
+`bash ./demo.sh reset && bash ./demo.sh up` for the one thing he does most —
+while `make demo` was a single word. A second front door that is harder to use
+than the first is not a second front door. `logs` earns its place for the same
+reason: it is what you need when a process did not start, which is exactly when
+a customer is alone with it.
+
+**Out of scope, deliberately:** §14's `client-id` target, which the spec now
+records as never built. It is a fair candidate for `demo.sh` — worth more to a
+customer than to an SE who can click the console button — but it is a separate
+decision and not required by §14.1.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+# tests/test_demo_sh.py
+"""§14.1 — the entry point that assumes nothing.
+
+The live-stack cycle is a MANUAL step (Step 10), not a test here: it binds
+7233, 8000 and 8001, which would collide with a dev stack and make `make
+verify` depend on free ports. Same call as R-022's browser drive — the
+structural gates are committed, the thing that needs real processes is run by
+hand and reported.
+"""
+import os
+import re
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "demo.sh"
+VERBS = ("demo", "up", "down", "status", "logs", "reset", "restart-worker")
+
+
+def run(*args, **kw):
+    return subprocess.run(["bash", str(SCRIPT), *args], cwd=ROOT,
+                          capture_output=True, text=True, timeout=60, **kw)
+
+
+def test_the_script_exists_and_is_bash():
+    assert SCRIPT.is_file()
+    assert SCRIPT.read_text().startswith("#!/usr/bin/env bash")
+
+
+def test_every_verb_is_handled():
+    out = run("no-such-verb")
+    assert out.returncode != 0
+    for verb in VERBS:
+        assert verb in out.stdout + out.stderr, f"{verb} missing from usage"
+
+
+def test_no_pgrep_or_pkill_anywhere():
+    """§14.1. Git Bash ships rm, tail, grep, nohup, kill and mkdir — but not
+    procps. `pgrep` is the one tool that would break the customer, and it is
+    also what cost R-001 and R-025."""
+    for f in (SCRIPT, ROOT / "make" / "common.mk"):
+        body = f.read_text()
+        assert "pgrep" not in body, f"{f.name} still uses pgrep"
+        assert "pkill" not in body, f"{f.name} still uses pkill"
+
+
+def test_the_long_running_processes_do_not_go_through_uv_run():
+    """The measured trap: `uv run` forks a child python, the CHILD binds the
+    port, so `$!` records uv and killing it orphans the listener. The venv
+    interpreter is started directly so `$!` IS the port owner."""
+    body = SCRIPT.read_text()
+    assert ".venv/bin/python" in body
+    assert ".venv/Scripts/python.exe" in body, "no Windows interpreter path"
+    for line in body.splitlines():
+        if "nohup" in line:
+            assert "uv run" not in line, f"uv run in a spawn line: {line.strip()}"
+
+
+def test_status_on_a_stopped_stack_says_so_and_exits_zero():
+    out = run("status")
+    assert out.returncode == 0, out.stderr
+    for name in ("temporal", "core banking", "gateway", "worker"):
+        assert name in out.stdout
+
+
+def test_a_stale_pid_file_reads_as_stopped_and_does_not_block(tmp_path):
+    """§14.1's stated new failure mode. A killed process leaves its file
+    behind, so liveness must be checked rather than existence — and a stale
+    file must not make `up` refuse to start."""
+    run("down")
+    runsdir = ROOT / ".run"
+    runsdir.mkdir(exist_ok=True)
+    stale = runsdir / "gateway.pid"
+    stale.write_text("999999\n")          # a pid that cannot be alive
+    try:
+        out = run("status")
+        assert out.returncode == 0, out.stderr
+        assert re.search(r"gateway\s*:\s*stopped", out.stdout), out.stdout
+    finally:
+        stale.unlink(missing_ok=True)
+
+
+def test_gitattributes_pins_shell_scripts_to_lf():
+    """Git for Windows defaults to core.autocrlf=true. Without this the
+    customer's FIRST command returns `/bin/bash^M: bad interpreter`, which
+    looks like our defect."""
+    ga = (ROOT / ".gitattributes").read_text()
+    assert re.search(r"\*\.sh\s+text\s+eol=lf", ga), ga
+
+
+def test_the_run_directory_is_gitignored():
+    assert ".run/" in (ROOT / ".gitignore").read_text()
+
+
+def test_make_delegates_rather_than_duplicating():
+    """One implementation, two front doors (§14.1). A recipe that starts a
+    process itself is a second definition, and this build has paid for that
+    twice — R-035 and the demo-reset help entry."""
+    mk = (ROOT / "make" / "common.mk").read_text()
+    for verb in ("up", "down", "status", "demo-reset", "restart-worker"):
+        assert f"demo.sh {verb}" in mk, f"`make {verb}` does not call demo.sh"
+    assert not (ROOT / "make" / "start.sh").exists(), \
+        "start.sh should have folded into demo.sh"
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `uv run pytest tests/test_demo_sh.py -q`
+Expected: every test fails or errors — `demo.sh` does not exist yet.
+
+- [ ] **Step 3: Write `demo.sh`**
+
+```bash
+#!/usr/bin/env bash
+# The entry point that assumes nothing. §14.1.
+#
+# Runs on macOS, Linux, and Windows under Git Bash. `make` calls this script
+# rather than reimplementing it, so there is one behaviour and two front doors.
+#
+# Two things here are load-bearing and were measured, not guessed:
+#
+#  * The venv interpreter is started DIRECTLY, never through `uv run`. `uv run`
+#    forks a child python and the CHILD binds the port, so `$!` would record uv
+#    and killing it would orphan the listener -- which surfaces one step later
+#    as the next `up` failing on a bound port. Started directly, `$!` is the
+#    process that owns the port.
+#  * Liveness is `kill -0` against a recorded pid, never `pgrep`. Git Bash has
+#    no procps, and `pgrep -f` is what cost R-001 and R-025 -- a guard that
+#    matched its own command line, so `make up` printed the URLs having started
+#    nothing for eight tasks.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")" && pwd)
+cd "$ROOT"
+RUN="$ROOT/.run"
+mkdir -p "$RUN"
+
+pidfile() { printf '%s/%s.pid' "$RUN" "$1"; }
+logfile() { printf '%s/%s.log' "$RUN" "$1"; }
+
+label() {
+  case $1 in
+    temporal) printf 'temporal    ' ;;
+    core)     printf 'core banking' ;;
+    gateway)  printf 'gateway     ' ;;
+    worker)   printf 'worker      ' ;;
+  esac
+}
+
+venv_python() {
+  if   [ -x "$ROOT/.venv/bin/python" ];         then printf '%s' "$ROOT/.venv/bin/python"
+  elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then printf '%s' "$ROOT/.venv/Scripts/python.exe"
+  else return 1
+  fi
+}
+
+ensure_venv() {
+  venv_python >/dev/null 2>&1 && return 0
+  command -v uv >/dev/null 2>&1 || {
+    echo "uv is not on PATH. See the README's Setup section." >&2
+    exit 1
+  }
+  echo "  creating the virtualenv (uv sync)..."
+  uv sync
+  venv_python >/dev/null 2>&1 || {
+    echo "uv sync finished but no venv interpreter appeared" >&2
+    exit 1
+  }
+}
+
+# A pid file outlives the process that wrote it (§14.1), so ask the OS.
+alive() {
+  local f pid
+  f=$(pidfile "$1")
+  [ -f "$f" ] || return 1
+  pid=$(cat "$f" 2>/dev/null || true)
+  [ -n "${pid:-}" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+spawn() {                       # spawn <name> <command...>
+  local name=$1; shift
+  if alive "$name"; then
+    echo "  $(label "$name") already running"
+    return 0
+  fi
+  rm -f "$(pidfile "$name")"    # a stale file must never block a start
+  nohup "$@" > "$(logfile "$name")" 2>&1 &
+  printf '%s\n' "$!" > "$(pidfile "$name")"
+  echo "  $(label "$name") started"
+}
+
+stop() {                        # stop <name>
+  local f pid
+  f=$(pidfile "$1")
+  if alive "$1"; then
+    pid=$(cat "$f")
+    kill "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.3
+    done
+    kill -9 "$pid" 2>/dev/null || true
+    echo "  $(label "$1") stopped"
+  fi
+  rm -f "$f"
+}
+
+cmd_up() {
+  ensure_venv
+  local py; py=$(venv_python)
+
+  command -v temporal >/dev/null 2>&1 || {
+    echo "The Temporal CLI is not on PATH. See the README's Setup section:" >&2
+    echo "  macOS   brew install temporal" >&2
+    echo "  Windows winget install Temporal.Temporal" >&2
+    exit 1
+  }
+  spawn temporal temporal server start-dev --ui-port 8233
+  sleep 3
+  spawn core    "$py" -m uvicorn core_banking.app:app --port 8001
+  spawn gateway "$py" -m uvicorn web.gateway:app --port 8000
+  spawn worker  "$py" -m python.worker
+  echo ""
+  echo "  console      -> http://localhost:8000"
+  echo "  temporal UI  -> http://localhost:8233"
+  echo "  core banking -> http://localhost:8001/ledger"
+}
+
+cmd_down()   { for n in worker gateway core temporal; do stop "$n"; done; }
+cmd_status() {
+  for n in temporal core gateway worker; do
+    if alive "$n"; then printf '%s: running (pid %s)\n' "$(label "$n")" "$(cat "$(pidfile "$n")")"
+    else                printf '%s: stopped\n' "$(label "$n")"
+    fi
+  done
+}
+cmd_reset() {
+  rm -rf "$ROOT/.store" "$ROOT/outbox" "$ROOT/core_banking/ledger.db" "$ROOT/.llm_down"
+  echo "application state cleared"
+}
+cmd_restart_worker() {
+  stop worker
+  ensure_venv
+  spawn worker "$(venv_python)" -m python.worker
+  echo "  the workflow survives this"
+}
+
+cmd_logs() { tail -f "$RUN"/*.log; }
+
+case "${1:-}" in
+  demo)           cmd_reset; cmd_up ;;
+  up)             cmd_up ;;
+  logs)           cmd_logs ;;
+  down)           cmd_down ;;
+  status)         cmd_status ;;
+  reset)          cmd_reset ;;
+  restart-worker) cmd_restart_worker ;;
+  *)
+    cat >&2 <<'USAGE'
+usage: bash ./demo.sh <command>
+
+  demo            reset state, start everything, print the URLs  <- start here
+  up              start Temporal, core banking, gateway and worker
+  down            stop everything this script started
+  status          which of the four are running
+  logs            tail all four process logs
+  reset           clear state so you can Submit again -- no restart needed
+  restart-worker  the worker-kill beat: prove the workflow survives it
+
+Run `make help` instead if you have make.
+USAGE
+    exit 2
+    ;;
+esac
+```
+
+- [ ] **Step 4: Create `.gitattributes` and update `.gitignore`**
+
+```
+# Shell scripts MUST stay LF. Git for Windows defaults to core.autocrlf=true,
+# which would rewrite demo.sh with CRLF on clone -- and the customer's first
+# command would return `/bin/bash^M: bad interpreter: No such file or
+# directory`, before anything works, looking like a defect in this repo. §14.1.
+*.sh text eol=lf
+```
+
+Append `.run/` to `.gitignore`.
+
+- [ ] **Step 5: Run the structural tests**
+
+Run: `uv run pytest tests/test_demo_sh.py -q -k "not make_delegates"`
+Expected: all pass. `make_delegates` still fails — Step 6 is what fixes it.
+
+- [ ] **Step 6: Rewrite the Make recipes and delete `start.sh`**
+
+Each process recipe becomes a call. Keep the `## N group|description`
+annotations exactly as they are — `tests/test_make.py` requires every public
+target to carry one, and `make help` is generated from them.
+
+```make
+up:  ## 2 demo|start Temporal, core banking, gateway and worker (no reset)
+	@$(ROOT)/demo.sh up
+
+down:  ## 2 demo|stop everything this Makefile started
+	@$(ROOT)/demo.sh down
+
+status:  ## 2 demo|which of the four processes are up, and on which ports
+	@$(ROOT)/demo.sh status
+
+demo-reset:  ## 2 demo|clear state so you can Submit again — no restart needed
+	@$(ROOT)/demo.sh reset
+
+restart-worker:  ## 2 demo|the worker-kill beat: prove the workflow survives it
+	@$(ROOT)/demo.sh restart-worker
+
+logs:  ## 2 demo|tail all four process logs from .run/
+	tail -f $(ROOT)/.run/*.log
+```
+
+`demo: demo-reset up` stays as it is — it is a dependency list, not a recipe.
+Delete the four `temporal` / `core-banking` / `gateway` / `worker` targets and
+their `.PHONY` entries, delete `kill-worker`, and `git rm make/start.sh`.
+
+`clean: down demo-reset` keeps working unchanged.
+
+- [ ] **Step 7: Confirm Make still behaves**
+
+Run: `uv run pytest tests/test_make.py tests/test_demo_sh.py -q`
+Expected: all pass, including `make_delegates`.
+
+Run: `make help`
+Expected: the same grouped list as before, minus `kill-worker`. If a row
+vanished, a `## ` annotation was dropped in the rewrite.
+
+- [ ] **Step 8: `make verify`**
+
+Run: `make verify`
+Expected: `VERIFY OK: 23/23`, and the count rises by the number of tests in
+`tests/test_demo_sh.py`.
+
+- [ ] **Step 9: Move the log paths in the rules file**
+
+`.claude/rules/stack-and-make.md` names `/tmp/onboarding-worker.log` in four
+places and describes the `pgrep` guard at length. Logs now live in `.run/`.
+Rewrite the pgrep section to say the mechanism is retired and why the hazard is
+gone, rather than deleting the history — R-001 and R-025 are why the file says
+what it says.
+
+- [ ] **Step 10: Cycle the stack twice — the orphan proof**
+
+This is the step that catches the failure mode this task exists to avoid, and
+no committed test covers it.
+
+```bash
+bash ./demo.sh up && sleep 6 && bash ./demo.sh status
+bash ./demo.sh down && sleep 2
+lsof -ti :8000 -ti :8001 -ti :7233 || echo "all three ports free"
+bash ./demo.sh up && sleep 6 && bash ./demo.sh status
+bash ./demo.sh down
+```
+
+The second `up` must start cleanly. **If it fails on a bound port, a killed
+parent orphaned its child** — check that no `nohup` line goes through
+`uv run`. Then confirm idempotence: `bash ./demo.sh up` twice in a row must
+report "already running" rather than starting a second copy.
+
+- [ ] **Step 11: Drive the demo through the script alone**
+
+`bash ./demo.sh reset && bash ./demo.sh up`, then walk the README's numbered
+walkthrough in the browser to `complete` and confirm `curl -s
+localhost:8001/ledger` shows one account. The point is to use **no `make` at
+all** — that is the customer's path, and it has never been run.
+
+- [ ] **Step 12: Write the README's Windows section**
+
+Before the existing Setup, because he reads top-down. Cover, in this order:
+
+1. **Check what he has**: `git --version` and `bash --version`. Git for
+   Windows supplies both, and he needs Git to clone the repo anyway. If `bash`
+   is missing, point at Git for Windows rather than WSL.
+2. **The three prerequisites** with winget commands — Temporal CLI, uv, and
+   Python — noting the §12 UI floor of v2.34.6 applies on Windows too.
+3. **`bash ./demo.sh up`**, not `./demo.sh up`: Git on Windows does not
+   reliably preserve the executable bit.
+4. **`uv run pytest`** for the suite — no script and no make needed.
+5. **No `make` required, and do not install it**: winget/Chocolatey/Scoop give
+   GNU make alone, whose recipes then run under `cmd.exe` and fail on the
+   first `rm -rf`, which looks like a bug in this repo. Only MSYS2, Cygwin or
+   WSL supply the POSIX tools Make needs, and each is a larger install than
+   the demo.
+6. **WSL as a fallback paragraph** — everything works untouched inside it, at
+   the cost of a real install and forwarding `:8000` and `:8233`.
+
+Add a line to the Commands table saying every `make` verb has a
+`bash ./demo.sh` equivalent except `fixtures`, `histories` and `documents`,
+which need an API key and stay developer-only.
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add demo.sh .gitattributes .gitignore make/ README.md tests/test_demo_sh.py \
+        .claude/rules/stack-and-make.md
+git rm make/start.sh
+git commit -m "feat: demo.sh — the entry point that assumes nothing (§14.1)"
+```
+
+---
+
 ### Task 21: Final verification and the README — TAIL, sequential, runs AFTER Task 22
 
 **Files:**

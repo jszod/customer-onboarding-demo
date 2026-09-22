@@ -45,7 +45,19 @@ and see its blast radius. The inversion is the contribution.
   never built.** If the call falls back to a generic canned AI demo, the design
   itself is still worth walking a customer through. That reader has no runbook
   and no code — only diagrams and reasoning. §21 specifies that deliverable.
+- **Fourth — the customer who runs it, on Windows.** Added after the build: the
+  repo is handed to a customer who clones it and drives it himself, on a machine
+  with no `make`, no POSIX shell guaranteed, and no one beside him to debug it.
+  He is not the fallback audience above — that reader only reads. This one
+  executes, and every assumption the runbook makes is his problem. §14.1 is his
+  entry point.
 - **Not:** a workshop artifact. Runbook choices favour the laptop case (§14).
+
+**The fourth audience is why §14 has two front doors.** It arrived late, and
+late arrival is the point: §14's original targets were written for one laptop
+belonging to the person who wrote them, and every POSIX assumption in them was
+free. Handing the repo to someone else made twelve of those assumptions visible
+at once.
 
 **The third audience has a scheduling consequence, stated here because it is
 counter-intuitive:** the customer-shareable artifact must be built **early**,
@@ -1145,13 +1157,25 @@ them changes what the demo demonstrates.
 | Process | Command | Port |
 |---------|---------|------|
 | Temporal dev server | `temporal server start-dev --ui-port 8233` | 7233 / UI 8233 |
-| Worker | `uv run python -m worker` | — |
-| Gateway + console | `uv run uvicorn web.gateway:app --port 8000` | 8000 |
-| Fake core banking | `uv run uvicorn core_banking.app:app --port 8001` | 8001 |
+| Worker | the venv interpreter directly: `python -m python.worker` | — |
+| Gateway + console | the venv interpreter directly: `python -m uvicorn web.gateway:app --port 8000` | 8000 |
+| Fake core banking | the venv interpreter directly: `python -m uvicorn core_banking.app:app --port 8001` | 8001 |
 
-Pattern from `canonical-ai-demo/make/common.mk`: `pgrep` guards so targets are
-idempotent, `nohup` with logs under `/tmp`, `pkill -f` on `down`, and `up`
+Never `uv run <cmd>` — §14.1 explains why: it forks a child that binds the
+port, so the pid `demo.sh` records is not the process holding it.
+
+Pattern borrowed from `canonical-ai-demo/make/common.mk`: idempotent start
+targets, background processes with logs under a temp directory, and `up`
 printing the URLs.
+
+**Two halves of that pattern were dropped, and §14.1 says why.** Canonical
+guards with `pgrep` and stops with `pkill -f`, and this repo copied both. The
+guard cost it R-001 and R-025 — a recipe containing both the pattern and the
+command it guards matches its own shell, and `make up` printed the URLs having
+started nothing for eight tasks. The pattern is also the one thing Git Bash
+cannot supply, which made it the blocker for §2's fourth audience. PID files
+replace both. Idempotence and the log directory survive; the mechanism does
+not.
 
 **Why no Docker.** Canonical's compose file exists solely for Postgres, and
 this demo has no Postgres — Temporal is the state store, documents are a
@@ -1166,11 +1190,11 @@ case (§2), and `uv.lock` already pins the environment.
 |--------|---------|
 | `up` / `down` / `status` / `logs` | canonical's verbs, for muscle memory across demos |
 | `demo` | reset state, start everything, print the URLs |
-| `worker` / `kill-worker` / `restart-worker` | the worker-kill beat. **Not** a bare `kill` — ambiguity mid-demo is bad |
+| `restart-worker` | the worker-kill beat — stop, then start the worker back up, proving the workflow survives it. **Not** a bare `kill` — ambiguity mid-demo is bad |
 | `test` | run the suite — the verification gate (§16) |
 | `verify` | `test` plus `skipped == 0`; the machine-checkable definition of done (§16.8) |
 | `demo-reset` | clear the ledger, outbox, and working document store |
-| `client-id` | fire the callback from the CLI, as a fallback if the console button misbehaves on stage |
+| `client-id` | fire the callback from the CLI, as a fallback if the console button misbehaves on stage. **Never built** — found by the §14.1 sweep. The gateway endpoint exists (`POST /api/assign/{client_key}`); no target ever called it. Worth more to §2's fourth audience than to the SE who can open a browser, so it is a candidate for `demo.sh` rather than for `make` |
 | `fixtures` | re-record extraction fixtures from a live run |
 | `histories` | capture workflow histories for replay tests |
 | `clean` | `down` keeps state; `clean` removes it |
@@ -1179,6 +1203,85 @@ case (§2), and `uv.lock` already pins the environment.
 artifact, or a workshop where fifteen laptops' Python installs cannot be
 debugged. If that happens, follow canonical's precedent — Dockerfiles under
 `docker/` for deployment, kept out of the local dev path.
+
+**That trigger has since fired, and the answer is still no.** The repo is now
+handed to a customer who runs it himself (§2's fourth audience) — which is
+exactly the first clause above. Docker was reconsidered on those terms and
+declined, and §18 carries the re-argued cut. The short version: the reason §18
+originally gave for the cut is void, but three others survive, and one
+container to run one dev server and three Python processes is a heavier ask of
+a Windows user than the two installs he needs anyway. The *second* clause has
+not fired — this is one customer's laptop, not fifteen.
+
+### 14.1 `demo.sh` — the entry point that assumes nothing
+
+§2's fourth audience has no `make`. Windows ships none, and the routes that
+install it (winget, Chocolatey, Scoop) deliver GNU make alone, which then runs
+its recipes through `cmd.exe` and fails on the first `rm -rf` — a failure that
+reads as this repo's bug rather than as a missing toolchain. The routes that
+*would* work (MSYS2, Cygwin, WSL) are each a larger install than the demo.
+
+So the stack gets a second front door: **`demo.sh` at the repo root**, with
+subcommands `up`, `down`, `status`, `reset` and `restart-worker`.
+
+    bash ./demo.sh up
+
+Invoked as `bash ./demo.sh`, not `./demo.sh`: Git for Windows does not reliably
+preserve the executable bit, and a permission error on the first command is a
+bad first impression.
+
+**`make` becomes a wrapper.** Every recipe in `make/common.mk` calls
+`demo.sh`, so there is one implementation and two ways to reach it. Indirection
+through Make is a smell and is accepted here for one reason: the alternative is
+two definitions of the same behaviours, and this build has already paid for
+that twice — R-035 (`DEMO_STEP_MS` forced in one recipe and not the other) and
+the `demo-reset` help entry that existed but could not be found.
+
+**PID files replace `pgrep` and `pkill`.** This is what makes the script run in
+Git Bash, which ships `rm`, `tail`, `grep`, `nohup`, `kill` and `mkdir` but not
+`procps`. Each process writes its PID on start; `status` and `down` read those
+files. Two consequences beyond portability:
+
+- **`make/start.sh` folds into `demo.sh`.** That file exists *only* because
+  `pgrep -f` matches whole command lines, so a recipe containing both the guard
+  and the command it guards matches its own shell (R-001, R-025 — `make up`
+  started nothing for eight tasks). PID files remove the class of bug, so the
+  file's reason for existing goes with it.
+- **A PID file can be stale.** A killed process leaves the file behind, so
+  `status` must check liveness rather than existence, and a stale file must not
+  make `up` refuse to start. Trading one failure mode for another only helps if
+  the new one is handled.
+
+**`.gitattributes` carries `*.sh text eol=lf`, and it is not optional.** Git for
+Windows defaults to `core.autocrlf=true`, so without it the customer clones the
+repo and his first command returns
+`/bin/bash^M: bad interpreter: No such file or directory`. It would be the
+first thing he hits, before any of this works, and it would look like our
+defect.
+
+**The risk worth stating: `uv run` spawns a child.** `uv run uvicorn …` means
+`uv` starts `python`, so recording `uv`'s PID and killing it can orphan the
+python process still holding port 8000 — and the symptom appears one step
+later, as the *next* `up` failing on a bound port. The script records the PID
+that owns the port, and the check is cycling `up`/`down` twice in a row rather
+than reading the code.
+
+**The Temporal CLI is a manual install on Windows, and the README must not
+pretend otherwise.** [Temporal's own docs](https://docs.temporal.io/cli/setup-cli)
+document exactly one Windows route — download the archive from
+`temporal.download`, extract it, and put `temporal.exe` on `PATH`. There is no
+winget, Chocolatey or Scoop package. An earlier draft of the README and of
+`demo.sh`'s error message both invented `winget install Temporal.Temporal`,
+which would have failed on the customer's very first command (R-039). `uv` does
+have a documented winget id, `astral-sh.uv`; the two are not the same case.
+`tests/test_readme.py` pins the distinction.
+
+**Windows keeps the Make-only targets it does not need.** `fixtures`,
+`histories` and `documents` stay Make-only: they need an API key and a live
+stack, the customer never calls them, and putting them in `demo.sh` doubles its
+surface for an audience that will not use it. §16.7 and §16.5 remain developer
+workflows. `test` and `verify` need no script at all — `uv run pytest` is
+already cross-platform.
 
 **Every target is defined once, in `make/common.mk`, and entry points include
 it.** The root `Makefile` is `include make/common.mk`; `python/Makefile` is
@@ -1204,8 +1307,10 @@ CLAUDE.md                  run/test commands, task queue, IDs, determinism rule
 CONTRACT.md                the §6 wire surface, SDK-agnostic
 TALK_TRACK.md              the narration for a live or design-only walkthrough
 docs/DESIGN-DIAGRAMS.md    three annotated mermaid diagrams (§21)
+demo.sh                    the entry point that assumes nothing (§14.1)
+.gitattributes             `*.sh text eol=lf` — without it Windows clones break demo.sh
 Makefile                   one line: `include make/common.mk`
-make/common.mk             every target, defined once; shared process management
+make/common.mk             every target, defined once; each recipe calls demo.sh
 documents/acme-corp/       committed sample PDFs (text-layer)
 fixtures/                  recorded call_llm responses
 histories/                 committed workflow histories for replay tests
@@ -1496,6 +1601,7 @@ answer than silence.
 | Cut | Why | Where it would attach |
 |-----|-----|----------------------|
 | **Document trickle** — workflow starts at application creation, then waits for documents to arrive by signal over weeks, chasing the client | Adds a second long-running wait and a second timer story; §1 commits to one headline failure | A signal loop before step 2, with its own SLA. Partially covered already: the reject loop re-ingests, so added documents work |
+| **Docker** | Re-decided, not inherited. §14's own trigger — *"turning the repo into a self-serve customer artifact"* — fired when §2's fourth audience appeared, so the original reason for this cut ("a stranger running the repo with only Docker installed is not the primary use case") is **void**. Three reasons survive it. There is still nothing to containerise: Temporal is the state store, documents are a directory, the ledger is SQLite — canonical's compose file exists for a Postgres this demo does not have. Docker Desktop is a larger install than the two the customer needs anyway (`uv`, the Temporal CLI), and carries commercial licensing questions a bank's laptop may not clear. And it would hide the thing §14 is demonstrating: four host processes you can kill individually, which is what makes the worker-kill beat legible. **What would still flip it:** the workshop case in §14 — many laptops whose Python installs cannot be debugged one at a time | `docker/` per canonical's precedent, kept out of the local dev path |
 | **`PayloadCodec` encryption** | Would turn the Temporal UI into ciphertext, destroying the primary observability surface (§12). The sharpest form of the question is already answered: documents never enter Temporal at all, only refs | `config.build_data_converter()` plus a codec server and `--codec-endpoint` on the UI and CLI. **The strongest candidate for the next increment** — encryption at rest is table stakes in a bank's evaluation |
 | **Multi-SDK workers** | 4× the build for no additional teaching value; only one worker can poll the queue at a time | `CONTRACT.md` is written now precisely so Go/Java/TS workers can be added by parallel agents later |
 | **`updatable_timer`** | The tiered timer already tells the durable-timer story | §9.2, as an extension signal |

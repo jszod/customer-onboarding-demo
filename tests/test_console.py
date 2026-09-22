@@ -375,11 +375,15 @@ def test_the_gap_input_is_styled_by_type_agnostic_selectors():
 
 
 def test_the_slow_core_checkbox_matches_the_core_banking_default():
-    """§10.1. The console never reads the core's control state — there is no
-    GET — so the checkbox is a hardcoded guess at a value another process owns.
-    While they disagreed, a fresh `make demo` showed the box unchecked over an
-    armed flag, and the control read as inverted: only a `change` event posts,
-    so turning the beat OFF meant checking the box and unchecking it again.
+    """§10.1. `core_banking/app.py`'s `/ledger` GET already reports
+    `slow_first_call`, but the console does not read it back on load -- so the
+    checkbox is a hardcoded guess at a value another process owns. While they
+    disagreed, a fresh `make demo` showed the box unchecked over an armed
+    flag, and the control read as inverted: only a `change` event posts, so
+    turning the beat OFF meant checking the box and unchecking it again.
+
+    Wiring the console to read `/ledger` on load is deferred work, not this
+    pass -- this test only pins the two hardcoded defaults against each other.
 
     Pinned here because nothing else connects the two files, and the runbook
     (Task 21 Step 2) walks the analyst straight into the timeout."""

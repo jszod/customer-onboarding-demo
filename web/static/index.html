@@ -27,6 +27,7 @@
   --done-wash:  #e6f3ee;
   --wait:       #985c09;   /* was #a1620a — 4.40:1 on --wait-wash, §13.1.5 */
   --wait-wash:  #fbf1e0;
+  --wait-ink:   #ffffff;
   --alert:      #ab2020;
   --alert-ink:  #ffffff;
   --alert-wash: #fbebe9;
@@ -63,6 +64,7 @@
     --done-wash:  #142b25;
     --wait:       #e8ad4a;
     --wait-wash:  #2c2415;
+    --wait-ink:   #0e1014;
     --alert:      #ff7b72;
     --alert-ink:  #0e1014;
     --alert-wash: #2e1a1a;
@@ -186,6 +188,11 @@ main { max-width: 1180px; margin: 0 auto; padding: var(--sp-7) var(--sp-7) 72px;
 .stepper li.is-failed::before  { background: var(--alert); }
 .stepper li.is-failed .step-n  { background: var(--alert); border-color: var(--alert); color: var(--alert-ink); }
 .stepper li.is-failed .step-label { color: var(--text-1); font-weight: 600; }
+/* Amber, not red -- `already_onboarded`: nothing failed (§10.1.1). */
+.stepper li.is-warn            { border-color: var(--wait); background: var(--wait-wash); }
+.stepper li.is-warn::before    { background: var(--wait); }
+.stepper li.is-warn .step-n    { background: var(--wait); border-color: var(--wait); color: var(--wait-ink); }
+.stepper li.is-warn .step-label { color: var(--text-1); font-weight: 600; }
 /* §13.1.4's responsive block lives at the end of the stylesheet, not here —
    a media query adds no specificity, so it has to come after the rules it
    overrides. See the "responsive" section below. */
@@ -200,6 +207,7 @@ main { max-width: 1180px; margin: 0 auto; padding: var(--sp-7) var(--sp-7) 72px;
 .fact-v { font-size: var(--fs-title); font-weight: 600; font-variant-numeric: tabular-nums; margin-top: var(--sp-1); }
 .fact-v.is-alert { color: var(--alert); }
 .fact-v.is-done  { color: var(--done); }
+.fact-v.is-wait  { color: var(--wait); }
 .errline {
   margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-sm);
   background: var(--alert-wash); border: 1px solid color-mix(in srgb, var(--alert) 32%, transparent);
@@ -493,8 +501,12 @@ const STAGE_INDEX = {
   /* §10.1.1 — stopped AT the account step, and nothing failed. */
   already_onboarded: 3,
 };
-const TERMINAL_BAD = { manual_intervention: true, rejected_by_core: true,
-                       already_onboarded: true };
+const TERMINAL_BAD = { manual_intervention: true, rejected_by_core: true };
+/* Amber, not red (§10.1.1): nothing failed here. The account exists, which
+   is the correct state -- it was simply not opened by this run. The pill
+   already rendered this stage as `is-waiting`; the stepper step and the
+   "Existing account" fact used to paint red anyway, disagreeing with it. */
+const TERMINAL_WARN = { already_onboarded: true };
 
 const STAGE_LABEL = {
   ingesting: "Collecting documents",
@@ -641,12 +653,13 @@ let reviewBusy = false;
 function renderStepper(st) {
   const idx = st ? (STAGE_INDEX[st.stage] ?? 0) : -1;
   const bad = st ? !!TERMINAL_BAD[st.stage] : false;
+  const warn = st ? !!TERMINAL_WARN[st.stage] : false;
   for (const li of $("stepper").children) {
     const i = Number(li.dataset.step);
-    li.classList.remove("is-done", "is-current", "is-failed");
+    li.classList.remove("is-done", "is-current", "is-failed", "is-warn");
     if (idx < 0) continue;
     if (i < idx) li.classList.add("is-done");
-    else if (i === idx) li.classList.add(bad ? "is-failed" : "is-current");
+    else if (i === idx) li.classList.add(bad ? "is-failed" : warn ? "is-warn" : "is-current");
   }
 }
 
@@ -747,7 +760,7 @@ function renderDetail(st) {
            "already holds an account from an earlier onboarding. No second account " +
            "was created, no welcome pack was sent, and the client was not contacted — " +
            "the specialist and supervisor were notified instead.";
-    facts = fact("Existing account", st.core_request_id || "—", "is-alert") +
+    facts = fact("Existing account", st.core_request_id || "—", "is-wait") +
             fact("Core attempts", st.core_attempt);
     if (st.last_error) err = '<div class="errline"><b>Detail</b> — ' + esc(st.last_error) + "</div>";
   }
