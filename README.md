@@ -4,8 +4,8 @@ A commercial bank onboards a new business client. The process is seven steps,
 one of which is AI. It runs on Temporal, and the point of the demo is what
 happens when things go wrong.
 
-**Setting up:** [macOS or Linux](#setup-on-macos-or-linux) ·
-[Windows](#setup-on-windows). After that everyone follows the same
+**Install:** [macOS or Linux](#installing-on-macos-or-linux) ·
+[Windows](#installing-on-windows) — then [run it](#running-it) and follow the
 [walkthrough](#walking-the-demo).
 
 ## What this shows
@@ -53,26 +53,50 @@ Every failure path ends in a **business status**, never a failed workflow. A
 failed workflow reads as a bug; a completed one carrying `manual_intervention`,
 `rejected_by_core` or `already_onboarded` reads as a process.
 
-## Prerequisites
+## Installing
 
-The same three things on every platform. Only the install command differs.
+Three things, whichever platform you are on. Follow the section for yours, then
+go to [Running it](#running-it).
 
-| What | Why | macOS / Linux | Windows |
-|---|---|---|---|
-| **Temporal CLI** | One binary carrying both the dev server and the Web UI. Nothing starts without it | `brew install temporal` | **No package manager.** [Download](https://temporal.download/cli/archive/latest?platform=windows&arch=amd64), unzip, and put `temporal.exe` on your `PATH` — see below |
-| **uv** | Dependencies, and it builds the virtualenv for you | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `winget install --id=astral-sh.uv -e` |
-| **Python 3.12** | uv can manage this for you | usually already there | `winget install Python.Python.3.12` |
+### Installing on macOS or Linux
 
-**The Temporal CLI has no winget/Chocolatey/Scoop package** — [Temporal's own
-install docs](https://docs.temporal.io/cli/setup-cli) document exactly one route
-on Windows, and it is the manual one. Grab
+    brew install temporal
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+
+Python 3.12 is usually already there, and `uv` can install it if not. Then
+[check the version](#check-the-temporal-cli-version).
+
+### Installing on Windows
+
+Work in **Git Bash**, not PowerShell or `cmd`. You already have it if you have
+Git; if `bash --version` comes back empty, install
+[Git for Windows](https://gitforwindows.org/) — not WSL, since the whole point
+of `demo.sh` is that a Linux subsystem is not required.
+
+**1. The Temporal CLI — manual, and do it first.** It is the only one needing a
+`PATH` edit, and [Temporal's own docs](https://docs.temporal.io/cli/setup-cli)
+document no package manager for Windows. Download
 [amd64](https://temporal.download/cli/archive/latest?platform=windows&arch=amd64)
 or [arm64](https://temporal.download/cli/archive/latest?platform=windows&arch=arm64),
-extract the archive, and add the folder holding `temporal.exe` to your `PATH`.
-Reopen Git Bash afterwards so it picks the change up, then check `temporal
---version` answers.
+extract it, and add the folder holding `temporal.exe` to your `PATH`. **Reopen
+Git Bash** so it picks up the change.
 
-Then check the version, because one number matters:
+**2. uv and Python**, from Git Bash or PowerShell:
+
+    winget install --id=astral-sh.uv -e
+    winget install Python.Python.3.12
+
+**3. Do not install `make`.** winget, Chocolatey and Scoop all give you GNU
+make *alone*, whose recipes then run under `cmd.exe` and fail on the first
+`rm -rf` — looking like a bug in this repo rather than a missing shell. Only
+MSYS2, Cygwin or WSL supply the POSIX tools Make needs underneath it, and each
+is a bigger install than this demo. `demo.sh` exists so you never need one.
+
+Everything here does work untouched inside **WSL** if you want it anyway,
+including `make` — at the cost of a real Linux install and forwarding `:8000`
+and `:8233` out to your Windows browser.
+
+### Check the Temporal CLI version
 
     temporal --version
     # temporal version 1.8.3 (Server 1.31.2, UI 2.50.1)
@@ -83,88 +107,61 @@ UI read as the business process rather than as a stack trace — do not render
 below it. Any recent CLI clears it comfortably. If yours does not, upgrade
 rather than debugging a missing summary as a code bug.
 
-### The API key, and running without one
-
-**You do not need a key.** The extraction fixtures are committed, and
-`FIXTURE_MODE=1` replays them instead of calling the model. The workflow, the
-child, the gaps and the escalation are all identical — the same code path, fed
-from `fixtures/acme-corp.json`. Every step is real except the model call.
+### Configure `.env` — no API key needed
 
     cp .env.example .env
 
-Leave `ANTHROPIC_API_KEY` blank and set `FIXTURE_MODE=1`. Put a real key on
-that line and drop `FIXTURE_MODE` when you want the live model.
+**You do not need an Anthropic key.** The extraction fixtures are committed, and
+`FIXTURE_MODE=1` replays them instead of calling the model — same workflow, same
+child, same gaps, same escalation, fed from `fixtures/acme-corp.json`. Every
+step is real except the model call. So leave `ANTHROPIC_API_KEY` blank and set:
 
-`.env` is gitignored, optional, and `.env.example` lists every §17 knob with
-its default — the SLA timers and the demo pacing are discoverable in one place.
-**Both `make` and `demo.sh` read it**, so the knobs behave the same whichever
-front door you use. A value in `.env` beats one exported in your shell.
+    FIXTURE_MODE=1
 
-The suite never needs a key: `make test` and `make verify` force
-`FIXTURE_MODE=1` and never touch the network. A key is required for exactly two
-things — driving the demo against the live model, and re-recording fixtures
-with `make fixtures`.
+Put a real key on that line and drop `FIXTURE_MODE` when you want the live
+model. A key is needed for exactly two things: driving the demo live, and
+re-recording fixtures with `make fixtures`.
 
-## Setup on macOS or Linux
+`.env` is gitignored and optional, `.env.example` lists every §17 knob with its
+default, and **both `make` and `demo.sh` read it** — so the SLA timers and the
+demo pacing behave the same whichever front door you use. A value in `.env`
+beats one exported in your shell.
 
-You have `make`, so use it. Install the [prerequisites](#prerequisites), then:
+## Running it
 
-    make deps
-    make demo     # → console :8000, Temporal UI :8233, core banking :8001
-    make verify   # the definition of done: green, and nothing skipped
+Two front doors onto the same thing. Use `make` if you have it; use `demo.sh`
+anywhere, including Windows.
 
-`make demo` starts four host processes (§14 — no Docker), each tracked by a pid
-file so the targets are idempotent, and `make down` stops them. If the console
-comes up but nothing progresses, run `make status` first: a missing CLI shows
-there as `temporal : stopped`, and the reason will be in `.run/temporal.log`.
+**With `make`** — macOS, Linux, or WSL:
 
-## Setup on Windows
+    make demo        # reset, start all four, print the URLs
+    make verify      # the definition of done: green, nothing skipped
+    make down        # stop everything
 
-There is no `make` on Windows and you do not need one. `demo.sh` at the repo
-root is the entry point — one bash script, no make, and it runs unmodified on
-macOS and Linux too.
+**With `demo.sh`** — anywhere, and the Windows path:
 
-**1. Check what you have.** Open Git Bash and run:
+    bash ./demo.sh demo     # reset, start all four, print the URLs
+    uv run pytest           # the suite
+    bash ./demo.sh down     # stop everything
 
-    git --version
-    bash --version
+Either way you get:
 
-Git for Windows supplies both, and you need Git to clone this repo anyway. If
-`bash` is missing, install [Git for Windows](https://gitforwindows.org/) — not
-WSL. The point of `demo.sh` is that a full Linux subsystem is not required.
+    console      → http://localhost:8000
+    temporal UI  → http://localhost:8233
+    core banking → http://localhost:8001/ledger
 
-**2. Install the [prerequisites](#prerequisites)** from that table — winget for
-uv and Python, and a manual download for the Temporal CLI, which has no
-package. Do the CLI first: it is the only one that needs a `PATH` edit and a
-fresh terminal.
+Three things worth knowing:
 
-**3. Set up `.env`** as described [above](#the-api-key-and-running-without-one).
-Keyless is fine, and is the right way to start.
+- **No separate install step.** Both front doors run `uv sync` on first use, so
+  a fresh clone is one command from running.
+- **Say `bash ./demo.sh`, not `./demo.sh`.** Git on Windows does not reliably
+  preserve the executable bit, and a bare `./demo.sh` can fail with a permission
+  error that has nothing to do with the script.
+- **If the console comes up but nothing progresses**, run `make status` or
+  `bash ./demo.sh status` first. A missing Temporal CLI shows there as
+  `temporal : stopped`, and the reason will be in `.run/temporal.log`.
 
-**4. Run it:**
-
-    bash ./demo.sh up
-
-That single command installs dependencies on first use, so there is no separate
-setup step. Type `bash ./demo.sh up`, **not** `./demo.sh up` — Git on Windows
-does not reliably preserve the executable bit, and a bare `./demo.sh` can fail
-with a permission error that has nothing to do with the script.
-
-**5. Run the suite** the same way as anywhere else:
-
-    uv run pytest
-
-**6. Do not install `make`.** winget, Chocolatey and Scoop all give you GNU make
-*alone*, whose recipes then run under `cmd.exe` and fail on the first `rm -rf`
-— in a way that looks like a bug in this repo rather than a missing shell. Only
-MSYS2, Cygwin or WSL supply the POSIX tools Make needs underneath it, and each
-is a larger install than the demo itself.
-
-**7. WSL, if you want it anyway.** Everything here — `make` included — works
-untouched inside WSL, at the cost of a real Linux install and forwarding
-`:8000` and `:8233` out to your Windows browser. Reach for it only if you
-specifically want the developer-only targets in the
-[Commands](#commands) table.
+The [Commands](#commands) table below lists every verb in both forms.
 
 ## Walking the demo
 
