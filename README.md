@@ -100,12 +100,32 @@ and `:8233` out to your Windows browser.
 
 `uv` downloads from PyPI by default. Many company networks block it and route
 packages through an internal mirror (Artifactory, Nexus), which may also hold
-back recent or flagged releases. If `uv sync` fails, its error names the
-package and the reason. Then:
+back recent or flagged releases.
 
-    export UV_INDEX_URL=<your company's PyPI mirror URL>
+**Check before the day you need it.** From Git Bash, in the repo folder:
+
+    uv sync
+
+If it finishes without an error, every package the demo uses is installed and
+you are done. If it fails, the error names the package and the reason, and
+that error is what your IT team needs if something has to be approved. Run
+this a few days ahead, because an approval can take that long.
+
+**Finding your mirror.** If your machine is already set up for Python, the
+mirror is usually in your pip settings:
+
+    pip config list
+    # global.index-url='https://artifactory.example.com/api/pypi/pypi/simple'
+
+If that prints nothing, ask IT for the PyPI mirror URL. Then:
+
+    export UV_INDEX_URL=<the index-url value>
     export UV_NATIVE_TLS=1    # if the error is a certificate failure
-    bash ./demo.sh up
+    uv sync
+
+Pointing `uv` at a different index can make it re-resolve `uv.lock` against
+what your mirror carries, so you may get slightly different package versions
+than the lock records. That is expected; leave the modified `uv.lock` in place.
 
 If the mirror refuses a package outright, that is a request for your IT team;
 nothing in this repo can route around it. **Don't `pip install` the missing
