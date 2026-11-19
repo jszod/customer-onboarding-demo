@@ -78,14 +78,23 @@ venv_python() {
   fi
 }
 
+# Sync on EVERY start, not only when .venv is missing (R-041). An interpreter
+# that exists says nothing about whether the packages do: a first sync that
+# dies mid-download leaves .venv behind, and skipping the sync from then on
+# turns the real error (a mirror refusing a package) into a missing-module
+# crash in the worker log. On a complete venv `uv sync` is a no-op that needs
+# no network.
 ensure_venv() {
-  venv_python >/dev/null 2>&1 && return 0
   command -v uv >/dev/null 2>&1 || {
     echo "uv is not on PATH. See the README's Setup section." >&2
     exit 1
   }
-  echo "  creating the virtualenv (uv sync)..."
-  uv sync
+  echo "  syncing the virtualenv (uv sync)..."
+  uv sync || {
+    echo "uv sync failed -- the packages above were not installed." >&2
+    echo "Behind a corporate package mirror, set UV_INDEX_URL. See the README's Installing section." >&2
+    exit 1
+  }
   venv_python >/dev/null 2>&1 || {
     echo "uv sync finished but no venv interpreter appeared" >&2
     exit 1

@@ -8,6 +8,7 @@ hand and reported.
 """
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -100,6 +101,44 @@ def test_a_stale_pid_file_reads_as_stopped_and_does_not_block(tmp_path):
     out = run("status", env=env)
     assert out.returncode == 0, out.stderr
     assert re.search(r"gateway\s*:\s*stopped", out.stdout), out.stdout
+
+
+def test_an_existing_venv_is_still_synced(tmp_path):
+    """R-041. A `.venv` that exists is not a `.venv` that is complete: a first
+    `uv sync` that dies mid-download (a corporate mirror refusing one package)
+    leaves the interpreter behind, and a guard that skips the sync whenever the
+    interpreter exists turns that into `No module named 'pypdf'` on every later
+    run, with the real error never shown again.
+
+    Runs a COPY of demo.sh from tmp_path, so its ROOT is tmp_path: a stub venv
+    interpreter, a stub `uv` that records the call and fails, and nothing that
+    can reach the developer's real `.venv` or start a real worker."""
+    shutil.copy(SCRIPT, tmp_path / "demo.sh")
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    stub_py = venv_bin / "python"
+    stub_py.write_text("#!/usr/bin/env bash\nexit 0\n")
+    stub_py.chmod(0o755)
+
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    called = tmp_path / "uv-called"
+    stub_uv = tools / "uv"
+    stub_uv.write_text(f"#!/usr/bin/env bash\necho \"$@\" >> '{called}'\n"
+                       "echo 'mirror refused pypdf' >&2\nexit 1\n")
+    stub_uv.chmod(0o755)
+
+    env = {**os.environ, "DEMO_RUN_DIR": str(tmp_path / "run"),
+           "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"}
+    out = subprocess.run(["bash", str(tmp_path / "demo.sh"), "restart-worker"],
+                         cwd=tmp_path, capture_output=True, text=True,
+                         timeout=60, env=env)
+
+    assert called.exists(), "uv sync was skipped because .venv already existed"
+    assert "sync" in called.read_text()
+    assert out.returncode != 0, "a failed sync must stop the script"
+    assert "mirror refused pypdf" in out.stderr, "uv's own error must reach the user"
+    assert "started" not in out.stdout, "the worker started on an unsynced venv"
 
 
 def test_gitattributes_pins_shell_scripts_to_lf():

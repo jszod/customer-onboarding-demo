@@ -2068,3 +2068,33 @@ person running the software on the machine it was written for — the same way
 R-025, R-026, R-034, R-035 and R-036 were found. Six of the nine commits in
 PR #9 came from running the demo rather than from the suite, which was green
 throughout. That is now the most repeated lesson in this file.
+
+## R-041 — `demo.sh` treated "`.venv` exists" as "`.venv` is complete"
+
+**Reported from the field.** A customer on a bank-managed Windows laptop ran
+the demo and the worker died on `No module named 'pypdf'`. pypdf is declared
+in `pyproject.toml` and locked in `uv.lock`, and it is pure Python, so the
+install itself was never in question.
+
+**The defect.** `ensure_venv` returned early whenever the venv interpreter
+existed, and only ran `uv sync` when it did not. A first `uv sync` that fails
+partway (most plausibly a corporate mirror refusing a package, or TLS
+inspection breaking the download) still leaves `.venv/` and its interpreter
+behind. Every later start then skipped the sync, so uv's real error was printed
+once and never again, and what the customer saw was a missing-module crash in
+the worker log.
+
+**Ruling.** `ensure_venv` runs `uv sync` on every start. On a complete venv it
+is a no-op: measured at about 20 ms, and it passes under `UV_OFFLINE=1`, so it
+adds no network dependency to a machine that is already installed. A failed sync
+now stops the script with uv's own error plus a pointer to the README's new
+corporate-mirror section, rather than starting a worker on a broken venv.
+
+**Gate.** `tests/test_demo_sh.py::test_an_existing_venv_is_still_synced`
+runs a copy of `demo.sh` against a stub venv and a `uv` stub that fails, and
+asserts that the sync ran, that its error reached stderr, and that no worker
+started. It was watched failing against the old guard first.
+
+**What this does not settle.** Whether the customer's mirror allows pypdf at
+all. If it does not, no change here helps; that is a request to their IT team,
+and the README now says so.
