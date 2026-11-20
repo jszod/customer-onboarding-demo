@@ -2068,3 +2068,76 @@ person running the software on the machine it was written for — the same way
 R-025, R-026, R-034, R-035 and R-036 were found. Six of the nine commits in
 PR #9 came from running the demo rather than from the suite, which was green
 throughout. That is now the most repeated lesson in this file.
+
+## R-041 — `demo.sh` treated "`.venv` exists" as "`.venv` is complete"
+
+**Reported from the field.** A customer on a bank-managed Windows laptop ran
+the demo and the worker died on `No module named 'pypdf'`. pypdf is declared
+in `pyproject.toml` and locked in `uv.lock`, and it is pure Python, so the
+install itself was never in question.
+
+**The defect.** `ensure_venv` returned early whenever the venv interpreter
+existed, and only ran `uv sync` when it did not. A first `uv sync` that fails
+partway (most plausibly a corporate mirror refusing a package, or TLS
+inspection breaking the download) still leaves `.venv/` and its interpreter
+behind. Every later start then skipped the sync, so uv's real error was printed
+once and never again, and what the customer saw was a missing-module crash in
+the worker log.
+
+**Ruling.** `ensure_venv` runs `uv sync` on every start. On a complete venv it
+is a no-op: measured at about 20 ms, and it passes under `UV_OFFLINE=1`, so it
+adds no network dependency to a machine that is already installed. A failed sync
+now stops the script with uv's own error plus a pointer to the README's new
+corporate-mirror section, rather than starting a worker on a broken venv.
+
+**Gate.** `tests/test_demo_sh.py::test_an_existing_venv_is_still_synced`
+runs a copy of `demo.sh` against a stub venv and a `uv` stub that fails, and
+asserts that the sync ran, that its error reached stderr, and that no worker
+started. It was watched failing against the old guard first.
+
+**What this does not settle.** Whether the customer's mirror allows pypdf at
+all. If it does not, no change here helps; that is a request to their IT team,
+and the README now says so.
+
+## R-042 — the lock carried 69 known vulnerabilities, and a bank mirror reads that list too
+
+**Found while fixing R-041.** Pushing the branch surfaced Dependabot alerts,
+and a local `pip-audit` over every package in `uv.lock` agreed: 69 known
+vulnerabilities, all in three packages, all with a fixed release available.
+
+| Package | Was | Now | How it is held |
+|---|---|---|---|
+| pypdf | 6.17.0 (25 advisories, mostly high) | 7.1.1 | direct: `pypdf>=7.0.0,<8` |
+| Pillow (via reportlab) | 12.3.0 (42, five critical) | 13.0.0 | `[tool.uv] constraint-dependencies` |
+| certifi (via httpx) | 2026.7.22 (one critical) | 2026.10.23 | `[tool.uv] constraint-dependencies` |
+
+**Why this belongs with R-041.** Bank package mirrors commonly refuse versions
+with high or critical advisories. That fits the customer's symptom better than a
+general network block: every other package installed, and pypdf was the one
+missing. R-041 makes that refusal visible; this removes the reason for it.
+
+**Why 7.x and not the last 6.x.** 6.21.4 would have cleared every advisory
+filed so far. But the 6.x line stopped at 6.21.4, and 7.0.0 shipped four
+security hardening changes with no 6.x backport. If any of those is later filed
+as an advisory, 6.x has no fixed version and a scanner blocks it again. Our use
+of pypdf is `PdfReader().pages`, `extract_text()` and, in one test,
+`PdfWriter`; 7.0's removals (Python 3.9, cryptography<43, long-deprecated
+APIs) touch none of it.
+
+**Why the floor is 7.0.0, not the locked 7.1.1.** A mirror may also hold back
+very recent releases. When a customer points `UV_INDEX_URL` at their mirror,
+uv re-resolves against what it carries (checked for R-041's README section), so
+a 7.0.0 floor lets it fall back to an older 7.x the mirror allows. A floor at
+the newest release would leave it nowhere to go.
+
+**Why constraints for Pillow and certifi.** Neither is ours to depend on
+directly. `constraint-dependencies` sets a floor on a transitive package without
+adding it to `dependencies`, so a future `uv lock` cannot slide back below the
+fix, and nothing pretends we import Pillow.
+
+**Gate.** `make verify`: 250 passed, `VERIFY OK: 23/23`. That includes
+`tests/test_sample_documents.py`, which extracts text from every committed PDF,
+so pypdf 7 reads the sample documents the same way. `pip-audit` over the new
+lock: no known vulnerabilities. Fixtures were not re-recorded: the prompt,
+`ApplicationFields` and the documents are unchanged, and the extraction tests
+pass against the recorded run.

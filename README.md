@@ -96,6 +96,42 @@ Everything here does work untouched inside **WSL** if you want it anyway,
 including `make` — at the cost of a real Linux install and forwarding `:8000`
 and `:8233` out to your Windows browser.
 
+### Behind a corporate package mirror
+
+`uv` downloads from PyPI by default. Many company networks block it and route
+packages through an internal mirror (Artifactory, Nexus), which may also hold
+back recent or flagged releases.
+
+**Check before the day you need it.** From Git Bash, in the repo folder:
+
+    uv sync
+
+If it finishes without an error, every package the demo uses is installed and
+you are done. If it fails, the error names the package and the reason, and
+that error is what your IT team needs if something has to be approved. Run
+this a few days ahead, because an approval can take that long.
+
+**Finding your mirror.** If your machine is already set up for Python, the
+mirror is usually in your pip settings:
+
+    pip config list
+    # global.index-url='https://artifactory.example.com/api/pypi/pypi/simple'
+
+If that prints nothing, ask IT for the PyPI mirror URL. Then:
+
+    export UV_INDEX_URL=<the index-url value>
+    export UV_NATIVE_TLS=1    # if the error is a certificate failure
+    uv sync
+
+Pointing `uv` at a different index can make it re-resolve `uv.lock` against
+what your mirror carries, so you may get slightly different package versions
+than the lock records. That is expected; leave the modified `uv.lock` in place.
+
+If the mirror refuses a package outright, that is a request for your IT team;
+nothing in this repo can route around it. **Don't `pip install` the missing
+package by hand**: a plain `pip` installs into your system Python, which the
+demo does not use, and the demo's `.venv` has no `pip` of its own.
+
 ### Check the Temporal CLI version
 
     temporal --version
@@ -152,8 +188,9 @@ Either way you get:
 
 Three things worth knowing:
 
-- **No separate install step.** Both front doors run `uv sync` on first use, so
-  a fresh clone is one command from running.
+- **No separate install step.** Both front doors run `uv sync` on every start,
+  so a fresh clone is one command from running, and an install that failed
+  halfway is repaired (or its error shown again) the next time you start.
 - **Say `bash ./demo.sh`, not `./demo.sh`.** Git on Windows does not reliably
   preserve the executable bit, and a bare `./demo.sh` can fail with a permission
   error that has nothing to do with the script.
@@ -241,7 +278,7 @@ left column and is generated from the targets themselves.
 
 | Make | `demo.sh` | What it does |
 |---|---|---|
-| `make deps` | *(automatic)* | `uv sync`. `demo.sh up` does this itself on first run |
+| `make deps` | *(automatic)* | `uv sync`. `demo.sh up` does this itself on every start |
 | `make demo` | `bash ./demo.sh demo` | reset state, start all four processes, print the URLs |
 | `make up` | `bash ./demo.sh up` | start them *without* resetting — keeps the ledger, so the ambiguous-timeout beat will not re-fire |
 | `make down` | `bash ./demo.sh down` | stop everything it started |
