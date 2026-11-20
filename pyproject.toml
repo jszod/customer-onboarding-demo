@@ -9,7 +9,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
-    "pypdf>=4.2",
+    "pypdf>=7.0.0,<8",
     "reportlab>=4.2",
 ]
 
@@ -23,3 +23,10 @@ pythonpath = ["."]
 
 [tool.uv]
 package = false
+# Security floors for packages we only get transitively (R-042): Pillow via
+# reportlab, certifi via httpx. A constraint pins the floor without making
+# either a direct dependency, so a re-lock cannot slide back below the fix.
+constraint-dependencies = [
+    "pillow>=13.0.0",
+    "certifi>=2026.10.18",
+]
